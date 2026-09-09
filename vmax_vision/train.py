@@ -43,8 +43,8 @@ def main(argv=None):
     torch.manual_seed(args.seed)
     OUT.mkdir(exist_ok=True)
 
-    print("decoding training clips (held-out: "
-          f"{clipmod.HELD_OUT_CAMERA} camera, {', '.join(clipmod.HELD_OUT_SCENARIOS)})", flush=True)
+    held = ", ".join(f"{k}:{v}" for k, v in clipmod.HELD_OUT_BY_SCENARIO.items())
+    print(f"decoding training clips (held out -> {held})", flush=True)
     samples = ds.build("train", verbose=True)
     print(f"{len(samples)} labelled training frames", flush=True)
     sampler = CropSampler(samples, crop=args.crop, seed=args.seed)

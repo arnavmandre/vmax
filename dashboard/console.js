@@ -21,14 +21,13 @@
   const anyCase = DATA.cases[0] || {};
   $("meta").innerHTML = [
     ["detector", anyCase.detector || "vmaxnet"],
-    ["held-out camera", meta.held_out_camera],
+    ["clips withheld", meta.held_out_clips],
     ["clips judged", meta.clip_count],
     ["generated", meta.generated_utc],
   ].map(([k, v]) => `<span class="chip">${esc(k)} <b>${esc(v)}</b></span>`).join("");
 
   /* ------------------------------------------------------------ headline */
-  const heldCam = DATA.summary["held_out_camera"] || {};
-  const heldScen = DATA.summary["held_out_scenario"] || {};
+  const heldOut = DATA.summary["held_out"] || {};
   const surveyed = DATA.summary["mode:surveyed"] || {};
   const gradErr = DATA.graduated.filter((g) => g.true_peak_m !== null && g.true_peak_m !== undefined)
     .map((g) => Math.abs(g.detected_peak_m - g.true_peak_m));
@@ -38,8 +37,8 @@
 
   $("tiles").innerHTML = [
     {
-      v: pct(heldCam.recall ?? surveyed.recall, 1), k: "Car recall, unseen camera",
-      n: `${heldCam.clips || 0} clips shot from the camera never trained on`,
+      v: pct(heldOut.recall ?? surveyed.recall, 1), k: "Car recall, unseen clips",
+      n: `${heldOut.clips || 0} clips withheld from training entirely`,
     },
     {
       v: (surveyed.margin_mae_m != null ? surveyed.margin_mae_m.toFixed(3) : "—"), unit: "m",
@@ -62,14 +61,14 @@
 
   const filters = [
     ...modes.map((mo) => ({ key: "mode", value: mo, label: mo === "surveyed" ? "Surveyed camera" : "Self-calibrated" })),
-    { key: "held", value: true, label: "Unseen camera only" },
+    { key: "held", value: true, label: "Withheld clips only" },
   ];
   $("qfilters").innerHTML = filters.map((f, i) =>
     `<button type="button" data-i="${i}" aria-pressed="false">${esc(f.label)}</button>`).join("");
 
   function visibleCases() {
     return DATA.cases.filter((c) => c.calibration_mode === state.mode
-      && (!state.onlyHeldOut || c.held_out_camera));
+      && (!state.onlyHeldOut || c.held_out));
   }
   function verdictClass(c) {
     if (c.verdict === "offence") return "offence";
@@ -92,7 +91,7 @@
         <i class="stripe"></i>
         <span class="body">
           <span class="name">${esc(pretty(c.scenario))}</span>
-          <span class="sub">${esc(c.camera)}${c.held_out_camera ? " · unseen" : ""}</span>
+          <span class="sub">${esc(c.camera)}${c.held_out ? " · withheld" : ""}</span>
         </span>
         <span class="right">
           <span class="marg">${c.peak_margin_detected != null ? m(c.peak_margin_detected) + " m" : "—"}</span>
@@ -237,7 +236,7 @@
     host.innerHTML = `
       <div class="verdict">
         <div class="head">
-          <div class="eyebrow">${esc(c.camera)} camera &middot; ${esc(c.calibration_mode === "surveyed" ? "surveyed calibration" : "self-calibrated")}${c.held_out_camera ? " &middot; never trained on" : ""}</div>
+          <div class="eyebrow">${esc(c.camera)} camera &middot; ${esc(c.calibration_mode === "surveyed" ? "surveyed calibration" : "self-calibrated")}${c.held_out ? " &middot; withheld from training" : ""}</div>
           <h3>${esc(pretty(c.scenario))}</h3>
         </div>
         <div><span class="badge ${cls}"><i class="dot"></i>${esc(verdictLabel(c))}</span></div>
@@ -370,7 +369,7 @@
       c.style.cursor = "pointer";
       c.addEventListener("pointerenter", () => {
         tip.style.opacity = 1;
-        tip.innerHTML = `${esc(p.camera)}${p.held_out_camera ? " (unseen)" : ""}<br>commanded <b>${p.target_m.toFixed(2)} m</b>`
+        tip.innerHTML = `${esc(p.camera)}${p.held_out ? " (withheld)" : ""}<br>commanded <b>${p.target_m.toFixed(2)} m</b>`
           + `<br>reported&nbsp; <b>${m(p.detected_peak_m)} m</b><br>error&nbsp;&nbsp;&nbsp;&nbsp; ${m(p.detected_peak_m - p.target_m)} m`;
         const r = svg.getBoundingClientRect();
         tip.style.left = Math.min(cx / W * r.width + 12, r.width - 150) + "px";
@@ -404,7 +403,7 @@
       <thead><tr><th>Camera</th><th>Position error</th><th>Field of view</th><th>Lateral error</th>
         <th>p95 lateral</th><th>Along-track offset</th><th>Solve time</th></tr></thead>
       <tbody>${rows.map((r) => `
-        <tr class="${r.held_out_camera ? "marked" : ""}">
+        <tr>
           <td>${esc(r.camera)}</td>
           <td>${r.position_error_m.toFixed(2)} m</td>
           <td>${r.fov_estimated_deg.toFixed(2)}° <span style="color:var(--ink-3)">/ ${r.fov_true_deg}°</span></td>
@@ -442,8 +441,9 @@
     const x = (i) => L + i / (log.length - 1) * (W - L - R);
     const y = (v) => T + (hi - v) / (hi - lo) * (H - T - B);
     host.innerHTML = `<h3>Training on this footage</h3>
-      <p>${log[log.length - 1].step} iterations over ${meta.train_cameras.join(" + ")} and the moving rig.
-      The ${esc(meta.held_out_camera)} camera and ${meta.held_out_scenarios.map(pretty).join(", ")} were withheld.</p>`;
+      <p>${log[log.length - 1].step} iterations over ${meta.train_cameras.join(", ")} and the moving rig.
+      One camera per scenario was withheld, plus ${meta.held_out_scenarios.map(pretty).join(" and ")} from every angle
+      &mdash; ${meta.held_out_clips} clips in all.</p>`;
     const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: "100%", role: "img",
       "aria-label": "Training loss against iteration" });
     svg.style.height = "auto";

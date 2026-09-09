@@ -67,7 +67,7 @@ def build(evaluation="pipeline_out/evaluation.json",
             "camera": entry["camera"],
             "calibration_mode": entry["calibration_mode"],
             "detector": entry["detector"],
-            "held_out_camera": entry["held_out_camera"],
+            "held_out": entry["held_out"],
             "held_out_scenario": entry["held_out_scenario"],
             "verdict": verdict,
             "confidence": best["detected"]["confidence"] if best else 0.0,
@@ -96,7 +96,7 @@ def build(evaluation="pipeline_out/evaluation.json",
                 "target_m": TARGETS[entry["scenario"]],
                 "true_peak_m": best.get("truth", {}).get("peak_margin_m"),
                 "detected_peak_m": best["detected"]["peak_margin_m"],
-                "held_out_camera": entry["held_out_camera"],
+                "held_out": entry["held_out"],
             })
 
     calib = []
@@ -117,7 +117,7 @@ def build(evaluation="pipeline_out/evaluation.json",
                 "reprojection_px": entry["ground_frame_error"]["mean_reprojection_error_px"],
                 "paint_agreement": entry.get("paint_agreement"),
                 "seconds": entry.get("seconds"),
-                "held_out_camera": camera == clipmod.HELD_OUT_CAMERA,
+                "camera_role": "solved from video",
             })
 
     train_log = []
@@ -136,9 +136,10 @@ def build(evaluation="pipeline_out/evaluation.json",
     payload = {
         "meta": {
             "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
-            "held_out_camera": clipmod.HELD_OUT_CAMERA,
+            "held_out_by_scenario": clipmod.HELD_OUT_BY_SCENARIO,
             "held_out_scenarios": clipmod.HELD_OUT_SCENARIOS,
             "train_cameras": clipmod.TRAIN_CAMERAS,
+            "held_out_clips": sum(1 for c in cases if c["held_out"]),
             "clip_count": len(cases),
         },
         "summary": report["summary"],

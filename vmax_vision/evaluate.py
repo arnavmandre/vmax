@@ -278,7 +278,7 @@ def score_run(run_dir="pipeline_out/runs", out="pipeline_out/evaluation.json",
             "camera": result["camera"],
             "calibration_mode": result["calibration_mode"],
             "detector": result["detector"],
-            "held_out_camera": result["camera"] == clipmod.HELD_OUT_CAMERA,
+            "held_out": clipmod.is_held_out(result["scenario"], result["camera"]),
             "held_out_scenario": result["scenario"] in clipmod.HELD_OUT_SCENARIOS,
             "detection": detection_metrics(result, clip, cameras),
             "margin": margins,
@@ -305,7 +305,7 @@ def summarise(report):
     for entry in report["clips"].values():
         for key in (f"mode:{entry['calibration_mode']}",
                     f"camera:{entry['camera']}",
-                    "held_out_camera" if entry["held_out_camera"] else "trained_camera",
+                    "held_out" if entry["held_out"] else "trained_on",
                     "held_out_scenario" if entry["held_out_scenario"] else "trained_scenario"):
             groups[key].append(entry)
     out = {}
