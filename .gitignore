@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+*.pyc
+*.pt
+!pipeline_out/vmaxnet.pt
+pipeline_out/runs/
