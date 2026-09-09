@@ -109,7 +109,7 @@ def gather_at(feature, index):
     return flat.gather(2, idx).permute(0, 2, 1)
 
 
-def detection_loss(out, target, weights=(1.0, 3.0, 1.5, 2.0, 1.0)):
+def detection_loss(out, target, weights=(1.0, 3.0, 1.0, 2.0, 1.0)):
     w_heat, w_contact, w_size, w_offset, w_mask = weights
     valid = target["valid"]
     n = valid.sum().clamp(min=1.0)

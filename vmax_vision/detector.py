@@ -79,7 +79,7 @@ class VmaxDetector:
         for y, x in zip(ys.tolist(), xs.tolist()):
             score = float(heat[y, x])
             off = out["offset"][0, :, y, x].numpy()
-            size = out["size"][0, :, y, x].numpy() * STRIDE
+            size = np.exp(np.clip(out["size"][0, :, y, x].numpy(), -4, 7)) * STRIDE
             cx = (x + float(off[0])) * STRIDE
             cy = (y + float(off[1])) * STRIDE
             contacts = out["contacts"][0, :, y, x].numpy().reshape(4, 2) * CONTACT_SCALE

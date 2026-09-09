@@ -137,7 +137,9 @@ class CropSampler:
             heat[iy, ix] = 1.0
             index[n] = iy * out + ix
             valid[n] = 1.0
-            size[n] = (bw / STRIDE, bh / STRIDE)
+            # Log size: across a decade of object scale a raw-pixel target
+            # would swamp every other head's gradient.
+            size[n] = (np.log(bw / STRIDE), np.log(bh / STRIDE))
             offset[n] = (fx - ix, fy - iy)
             contacts[n] = ((to_crop(inst["contacts_uv"]) - (ccx, ccy)) / CONTACT_SCALE).reshape(-1)
             contact_norm[n] = CONTACT_SCALE / max(float(np.hypot(bw, bh)), 8.0)
