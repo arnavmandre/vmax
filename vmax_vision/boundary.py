@@ -154,11 +154,17 @@ def find_events(judgements, min_frames=3, bridge=2, fps=24.0):
         members = [flags[i] for i in range(run[0], run[-1] + 1) if i in flags]
         offence = [m for m in members if m.is_violation]
         peak = max(offence, key=lambda m: m.margin_m)
+        # The peak of a noisy series is biased upward -- the largest of thirty
+        # measurements sits about two standard deviations above the value being
+        # measured. Reporting the median of the three highest frames removes
+        # most of that without blunting a genuine peak, which these excursions
+        # hold for a plateau of frames rather than a single one.
+        top = sorted((m.margin_m for m in offence), reverse=True)[:3]
         out.append(Event(
             start_frame=run[0], end_frame_inclusive=run[-1],
             frame_count=len(offence),
             start_time_s=run[0] / fps, end_time_exclusive_s=(run[-1] + 1) / fps,
-            peak_margin_m=float(peak.margin_m), peak_frame=int(peak.frame_idx),
+            peak_margin_m=float(np.median(top)), peak_frame=int(peak.frame_idx),
             mean_score=float(np.mean([m.score for m in members]))))
     return out
 

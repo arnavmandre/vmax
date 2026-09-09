@@ -55,6 +55,22 @@ class CropSampler:
     def _image(self, i):
         return cv2.imdecode(self.jpeg[i], cv2.IMREAD_COLOR)
 
+    def _recolour_livery(self, img, mask, probability=0.65):
+        """Rotate the hue of the car's own pixels, leaving the circuit alone."""
+        if self.rng.random() > probability or not mask.any():
+            return img
+        hsv = cv2.cvtColor(img.astype(np.uint8), cv2.COLOR_BGR2HSV)
+        shift = int(self.rng.integers(15, 165))
+        sel = mask.astype(bool)
+        hue = hsv[:, :, 0].astype(np.int32)
+        hue[sel] = (hue[sel] + shift) % 180
+        hsv[:, :, 0] = hue.astype(np.uint8)
+        if self.rng.random() < 0.5:
+            sat = hsv[:, :, 1].astype(np.float32)
+            sat[sel] *= float(self.rng.uniform(0.55, 1.35))
+            hsv[:, :, 1] = np.clip(sat, 0, 255).astype(np.uint8)
+        return cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR).astype(np.float32)
+
     def _photometric(self, img):
         img = img.astype(np.float32)
         img *= self.rng.uniform(0.75, 1.28)
@@ -101,7 +117,6 @@ class CropSampler:
         M = cv2.getPerspectiveTransform(src, dst)
         patch = cv2.warpPerspective(img, M, (crop, crop), flags=cv2.INTER_LINEAR,
                                     borderMode=cv2.BORDER_REPLICATE)
-        patch = self._photometric(patch)
 
         def to_crop(pts):
             pts = np.asarray(pts, float).reshape(1, -1, 2).astype(np.float32)
@@ -118,8 +133,10 @@ class CropSampler:
         contact_norm = np.zeros(MAX_INSTANCES, np.float32)
 
         n = 0
+        hulls = []
         for inst in rec["instances"]:
             hull = to_crop(inst["hull_uv"])
+            hulls.append(hull)
             cv2.fillConvexPoly(mask, cv2.convexHull(hull.astype(np.float32)).astype(np.int32), 1)
             # The box is re-derived from the warped silhouette: transforming the
             # two original corners is only correct for an axis-aligned map.
@@ -144,6 +161,13 @@ class CropSampler:
             contacts[n] = ((to_crop(inst["contacts_uv"]) - (ccx, ccy)) / CONTACT_SCALE).reshape(-1)
             contact_norm[n] = CONTACT_SCALE / max(float(np.hypot(bw, bh)), 8.0)
             n += 1
+
+        # Every training clip carries the same red car; the second entry only
+        # ever appears in the withheld two-car scenarios. Rotating the livery
+        # hue inside the silhouette is what stops the detector learning "car"
+        # to mean "that shade of red".
+        patch = self._recolour_livery(patch, mask)
+        patch = self._photometric(patch)
 
         mask_small = cv2.resize(mask, (out, out), interpolation=cv2.INTER_AREA).astype(np.float32)
         return {

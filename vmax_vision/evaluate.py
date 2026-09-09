@@ -310,7 +310,8 @@ def summarise(report):
             groups[key].append(entry)
     out = {}
     for key, entries in groups.items():
-        margins = [e["margin"] for e in entries if e["margin"].get("frames")]
+        margins = [e["margin"] for e in entries
+                   if e["margin"].get("frames") and np.isfinite(e["margin"].get("margin_mae_m", np.nan))]
         det = [e["detection"] for e in entries]
         out[key] = {
             "clips": len(entries),

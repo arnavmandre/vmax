@@ -118,7 +118,7 @@ def main(argv=None):
     p = sub.add_parser("run", help="run the pipeline over the clips")
     p.add_argument("--detector", choices=["vmaxnet", "yolo-coco"], default="vmaxnet")
     p.add_argument("--weights", default="pipeline_out/vmaxnet.pt")
-    p.add_argument("--threshold", type=float, default=0.30)
+    p.add_argument("--threshold", type=float, default=0.25)
     p.add_argument("--mode", choices=["surveyed", "self"], default="surveyed")
     p.add_argument("--scenarios", nargs="*", default=None)
     p.add_argument("--cameras", nargs="*", default=None)

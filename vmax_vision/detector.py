@@ -44,7 +44,7 @@ class VmaxDetector:
 
     name = "vmaxnet"
 
-    def __init__(self, weights="pipeline_out/vmaxnet.pt", threshold=0.30,
+    def __init__(self, weights="pipeline_out/vmaxnet.pt", threshold=0.25,
                  max_detections=8, threads=4, device="cpu"):
         torch.set_num_threads(threads)
         blob = torch.load(weights, map_location=device, weights_only=False)

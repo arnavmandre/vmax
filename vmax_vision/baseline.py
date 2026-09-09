@@ -21,7 +21,7 @@ from .calib import Camera
 def run(weights="yolov8m-seg.pt", camera=None, stride=4, conf=0.02,
         out="pipeline_out/baseline_coco.json", verbose=True):
     from ultralytics import YOLO
-    camera = camera or clipmod.HELD_OUT_CAMERA
+    camera = camera or "trackside"
     model = YOLO(weights)
     cameras = Camera.load_all()
     vehicle = {2: "car", 5: "bus", 7: "truck", 3: "motorcycle"}

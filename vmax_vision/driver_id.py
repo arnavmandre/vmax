@@ -43,7 +43,14 @@ class Attribution:
 
 
 def _hue_signature(frame_bgr, det, max_pixels=4000):
-    """Dominant chroma of the car's own pixels, excluding tarmac-grey ones."""
+    """The car's own colour, taken from the most chromatic part of its silhouette.
+
+    The circuit is not neutral -- red kerbs are within a few units of the red
+    livery, and the painted apron is close to the teal one -- so a mean over the
+    detection box reports the paint of whatever the car is standing on. Only
+    masked pixels count, and of those only the most chromatic half, whose median
+    is the paint rather than the shadow.
+    """
     box = np.array(det["box"], float)
     x0, y0 = np.maximum(box[:2].astype(int), 0)
     x1 = min(int(box[2]) + 1, frame_bgr.shape[1])
@@ -59,14 +66,19 @@ def _hue_signature(frame_bgr, det, max_pixels=4000):
         sub = data[y0 - oy:y1 - oy, x0 - ox:x1 - ox]
         if sub.shape == sel.shape:
             sel = sub
+    if crop is None or not np.size(crop.get("data", [])):
+        return None                       # without a silhouette, do not guess
     hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
-    sel = sel & (hsv[:, :, 1] > 70) & (hsv[:, :, 2] > 55)
+    sel = sel & (hsv[:, :, 1] > 60) & (hsv[:, :, 2] > 45)
     if sel.sum() < 12:
         return None
     pixels = patch[sel].astype(np.float32)
     if len(pixels) > max_pixels:
         pixels = pixels[np.random.default_rng(0).choice(len(pixels), max_pixels, False)]
-    return pixels.mean(axis=0)[::-1]  # BGR mean -> RGB
+    lab = cv2.cvtColor(pixels.reshape(-1, 1, 3).astype(np.uint8), cv2.COLOR_BGR2Lab)
+    chroma = np.linalg.norm(lab.reshape(-1, 3)[:, 1:].astype(np.float32) - 128.0, axis=1)
+    keep = chroma >= np.median(chroma)
+    return np.median(pixels[keep], axis=0)[::-1]  # BGR -> RGB
 
 
 def _livery_match(signature):
@@ -80,6 +92,8 @@ def _livery_match(signature):
     best, second = sorted(dist.items(), key=lambda kv: kv[1])[:2]
     separation = (second[1] - best[1]) / max(second[1], 1e-6)
     confidence = float(np.clip(separation * 1.6, 0.0, 1.0) * np.clip(1.0 - best[1] / 90.0, 0.0, 1.0))
+    if best[1] > 70.0:
+        return None, 0.0, {"distances": dist, "reason": "no livery within tolerance"}
     return best[0], confidence, {"distances": dist, "signature_rgb": [float(v) for v in signature]}
 
 
@@ -97,7 +111,7 @@ def attribute(track_frames, frames_bgr, judgements_by_track, fps=24.0):
                 continue
             sig = _hue_signature(frame, det)
             car, conf, ev = _livery_match(sig)
-            if car and conf > 0.05:
+            if car and conf > 0.12:
                 picks.append(car)
                 weights.append(conf * det["score"])
                 evidence.append(ev)
