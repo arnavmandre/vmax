@@ -2,6 +2,15 @@
 
 The v2 package upgrades the original simulator's visuals and adds a race-pace presentation sequence. It contains original generic single-seater geometry, not a licensed replica of a particular team's car or a specific season's regulation package.
 
+## Two halves
+
+The simulator generates the footage and its exact geometry. `vmax_vision/` is
+the detection stack that watches that footage as ordinary video and decides
+whether a car left the track, by how much, and which car it was — then is scored
+against the geometry it never saw. See `PIPELINE.md` for how it works,
+`VALIDATION_PIPELINE.md` for what it measured, and
+`dashboard/vmax_race_control.html` for the steward review console.
+
 ## Start here
 
 - `output/race_pace/race_pace.mp4`: 720p, 60 fps tracking-camera showcase with speed, lateral acceleration and tyre-margin readouts.

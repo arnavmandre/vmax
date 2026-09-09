@@ -78,6 +78,14 @@ fine-tuning, as the zero-shot baseline.
 `./run_all.sh` runs the whole post-training sequence: both calibration modes,
 scoring, the baseline, and the console build.
 
+## Results
+
+See `VALIDATION_PIPELINE.md` for the measured numbers, and
+`dashboard/vmax_race_control.html` for the steward console built from them.
+Headline: 20 of 20 offences found with no false alarms across the 24 clips,
+median peak-margin error 3.6 cm over the four graduated excursions, 30 of 31
+tracks attributed to the right car, and the two-frame blip correctly declined.
+
 ## Checks
 
 `python tests/test_pipeline.py` runs in seconds and needs no weights. It pins
