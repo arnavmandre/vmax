@@ -116,6 +116,8 @@ def build(evaluation="pipeline_out/evaluation.json",
                 "ground_error_m": entry["ground_frame_error"]["mean_ground_error_m"],
                 "reprojection_px": entry["ground_frame_error"]["mean_reprojection_error_px"],
                 "paint_agreement": entry.get("paint_agreement"),
+                "paint_agreement_at_truth": entry.get("paint_agreement_at_truth"),
+                "failure_mode": entry.get("failure_mode"),
                 "seconds": entry.get("seconds"),
                 "camera_role": "solved from video",
             })
@@ -133,7 +135,14 @@ def build(evaluation="pipeline_out/evaluation.json",
     if bp.exists():
         baseline_data = json.loads(bp.read_text())
 
+    peak_errors = [abs(g["detected_peak_m"] - g["target_m"]) for g in graduated
+                   if g["calibration_mode"] == "surveyed"]
     payload = {
+        "headline": {
+            "peak_margin_median_error_m": float(np.median(peak_errors)) if peak_errors else None,
+            "peak_margin_max_error_m": float(max(peak_errors)) if peak_errors else None,
+            "graduated_points": len(peak_errors),
+        },
         "meta": {
             "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
             "held_out_by_scenario": clipmod.HELD_OUT_BY_SCENARIO,

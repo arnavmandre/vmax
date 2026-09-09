@@ -38,6 +38,15 @@ def cmd_selfcal(args):
                          "vertical_fov_deg": cams[name].spec["vertical_fov_deg"]}
         best["position_error_m"] = float(
             np.linalg.norm(np.array(best["position_m"]) - cams[name].position))
+        # Score the true camera by the same measure, so a failure is attributed
+        # to the search or to the objective rather than left ambiguous.
+        best["paint_agreement_at_truth"] = selfcalib.paint_agreement(
+            bg, cams[name].position, cams[name].spec["look_at_m"],
+            cams[name].spec["vertical_fov_deg"])
+        best["failure_mode"] = (
+            None if best["position_error_m"] < 3.0
+            else ("objective" if best["paint_agreement_at_truth"] <= best["paint_agreement"]
+                  else "search"))
         out[name] = best
         print(f"{name}: position error {best['position_error_m']:.2f} m, "
               f"lateral {best['track_frame_error']['mean_abs_lateral_error_m']:.3f} m", flush=True)
@@ -85,7 +94,7 @@ def cmd_overlay(args):
         if args.only and key not in args.only:
             continue
         H, _sigma, _label = load_homography(result["camera"], result["calibration_mode"])
-        out = pathlib.Path(args.out) / f"{result['scenario']}__{result['camera']}.mp4"
+        out = pathlib.Path(args.out) / f"{result['scenario']}__{result['camera']}__{result['calibration_mode']}.mp4"
         render_clip(by_key[key], result, out, H)
         print("wrote", out, flush=True)
 

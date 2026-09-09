@@ -303,9 +303,14 @@ def summarise(report):
     """Headline numbers, split by the axes that decide whether to believe them."""
     groups = defaultdict(list)
     for entry in report["clips"].values():
-        for key in (f"mode:{entry['calibration_mode']}",
+        mode = entry["calibration_mode"]
+        held = "held_out" if entry["held_out"] else "trained_on"
+        for key in (f"mode:{mode}",
                     f"camera:{entry['camera']}",
-                    "held_out" if entry["held_out"] else "trained_on",
+                    held,
+                    # The headline axis: withheld footage judged the way an
+                    # installed system would judge it, from a surveyed camera.
+                    f"{mode}:{held}",
                     "held_out_scenario" if entry["held_out_scenario"] else "trained_scenario"):
             groups[key].append(entry)
     out = {}
@@ -315,6 +320,14 @@ def summarise(report):
         det = [e["detection"] for e in entries]
         out[key] = {
             "clips": len(entries),
+            "event_clips": sum(1 for e in entries if e["events"]["true_event_count"]),
+            "events_found": sum(len([r for r in e["events"]["detected_events"] if r["matched"]])
+                                for e in entries),
+            "events_missed": sum(len(e["events"]["missed_events"]) for e in entries),
+            "false_alarms": sum(len([r for r in e["events"]["detected_events"] if not r["matched"]])
+                                for e in entries),
+            "attribution_correct": sum(e["attribution"]["correct"] for e in entries),
+            "attribution_decided": sum(e["attribution"]["attributed"] for e in entries),
             "recall": float(np.mean([d["recall"] for d in det])),
             "precision": float(np.mean([d["precision"] for d in det])),
             "margin_mae_m": float(np.mean([m["margin_mae_m"] for m in margins])) if margins else None,

@@ -24,8 +24,8 @@
     "offset_residual_rms_m": 0.1294920253776784,
     "paint_agreement": 0.6292200468102798,
     "method": "surface-border chamfer against the circuit map; video only",
-    "seconds": 104.5,
-    "source_clip": "clean_lap/trackside.mp4",
+    "seed": 7,
+    "seconds": 107.1,
     "homography": [
       [
         -159.5356005920169,
@@ -43,6 +43,7 @@
         1.0
       ]
     ],
+    "source_clip": "clean_lap/trackside.mp4",
     "ground_frame_error": {
       "samples": 3077,
       "mean_ground_error_m": 2.1220712747621477,
@@ -74,21 +75,23 @@
       ],
       "vertical_fov_deg": 35
     },
-    "position_error_m": 1.1913362154803373
+    "position_error_m": 1.1913362154803373,
+    "paint_agreement_at_truth": 0.6175078909667584,
+    "failure_mode": null
   },
   "exit": {
-    "cost": 19.203453946079854,
+    "cost": 19.15756458089883,
     "position_m": [
-      50.3448813035361,
-      11.507534677603976,
-      3.9176481854260663
+      49.25857301034924,
+      9.889134812579933,
+      3.8635157101814883
     ],
     "look_at_m": [
-      20.735945441076236,
-      -2.427509008185068,
+      19.11209859026771,
+      -3.196551192421846,
       0.0
     ],
-    "vertical_fov_deg": 42.375542490020116,
+    "vertical_fov_deg": 42.704290043880135,
     "border_pixels": {
       "asphalt|line": 2699,
       "kerb_red|apron": 1046,
@@ -98,45 +101,46 @@
       1280,
       720
     ],
-    "offset_residual_rms_m": 0.07199828593183091,
-    "paint_agreement": 0.6220813168138575,
+    "offset_residual_rms_m": 0.1116833801286404,
+    "paint_agreement": 0.6245648817084287,
     "method": "surface-border chamfer against the circuit map; video only",
-    "seconds": 83.3,
-    "source_clip": "clean_lap/exit.mp4",
+    "seed": 0,
+    "seconds": 95.8,
     "homography": [
       [
-        -19.193840231844433,
-        11.26790561797775,
-        842.5404823514065
+        -19.288596228818236,
+        12.01584243831463,
+        837.165750452089
       ],
       [
-        -4.421107382528877,
-        -2.0807341675934867,
-        321.29146834860745
+        -4.657884593448735,
+        -2.021848869889863,
+        324.496411135145
       ],
       [
-        -0.01776858480337502,
-        -0.00836254320722175,
+        -0.01850265673320135,
+        -0.008031451800802319,
         1.0
       ]
     ],
+    "source_clip": "clean_lap/exit.mp4",
     "ground_frame_error": {
       "samples": 4372,
-      "mean_ground_error_m": 21.09015515884886,
-      "median_ground_error_m": 21.018721596300132,
-      "p95_ground_error_m": 27.04101694638669,
-      "max_ground_error_m": 31.22427674519764,
-      "mean_reprojection_error_px": 1687.997755699593,
-      "max_reprojection_error_px": 873797.2138357176
+      "mean_ground_error_m": 24.23158627651335,
+      "median_ground_error_m": 23.74184881416071,
+      "p95_ground_error_m": 32.886776872731154,
+      "max_ground_error_m": 38.36200816208551,
+      "mean_reprojection_error_px": 5031.634799089881,
+      "max_reprojection_error_px": 5895395.647386993
     },
     "track_frame_error": {
       "samples": 4372,
-      "mean_abs_lateral_error_m": 4.438891593528709,
-      "p95_abs_lateral_error_m": 16.753993237482426,
-      "max_abs_lateral_error_m": 19.27767926716501,
-      "along_track_gauge_m": -19.240646029368058,
-      "mean_abs_along_track_error_m": 3.0179502450870648,
-      "p95_abs_along_track_error_m": 15.040646029368048
+      "mean_abs_lateral_error_m": 5.0186457012974115,
+      "p95_abs_lateral_error_m": 18.79702003920947,
+      "max_abs_lateral_error_m": 21.310944701704003,
+      "along_track_gauge_m": -20.955243212293453,
+      "mean_abs_along_track_error_m": 3.7900326130384716,
+      "p95_abs_along_track_error_m": 16.755243212293443
     },
     "truth": {
       "position_m": [
@@ -151,7 +155,9 @@
       ],
       "vertical_fov_deg": 42
     },
-    "position_error_m": 27.576409174087015
+    "position_error_m": 29.438952348242076,
+    "paint_agreement_at_truth": 0.5967046477965654,
+    "failure_mode": "objective"
   },
   "broadcast": {
     "cost": 22.550545423716358,
@@ -178,8 +184,8 @@
     "offset_residual_rms_m": 17.800488544674103,
     "paint_agreement": 0.572672668346627,
     "method": "surface-border chamfer against the circuit map; video only",
-    "seconds": 96.0,
-    "source_clip": "clean_lap/broadcast.mp4",
+    "seed": 7,
+    "seconds": 102.8,
     "homography": [
       [
         3.186026959431619,
@@ -197,6 +203,7 @@
         1.0
       ]
     ],
+    "source_clip": "clean_lap/broadcast.mp4",
     "ground_frame_error": {
       "samples": 6231,
       "mean_ground_error_m": 0.41419699630534434,
@@ -228,6 +235,8 @@
       ],
       "vertical_fov_deg": 49
     },
-    "position_error_m": 0.9372598517236677
+    "position_error_m": 0.9372598517236677,
+    "paint_agreement_at_truth": 0.571663264957178,
+    "failure_mode": null
   }
 }

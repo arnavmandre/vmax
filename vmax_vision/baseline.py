@@ -58,8 +58,8 @@ def run(weights="yolov8m-seg.pt", camera=None, stride=4, conf=0.02,
                     inter = wh[0] * wh[1]
                     union = ((box[2] - box[0]) * (box[3] - box[1])
                              + (f[2] - f[0]) * (f[3] - f[1]) - inter)
-                    best = max(best, inter / max(union, 1e-9))
-                hits += best >= 0.5
+                    best = max(best, float(inter / max(union, 1e-9)))
+                hits += int(best >= 0.5)
         tp += hits
         fn += total - hits
         per_clip.append({"clip": clip.key, "matched": int(hits), "cars": int(total)})
@@ -70,14 +70,17 @@ def run(weights="yolov8m-seg.pt", camera=None, stride=4, conf=0.02,
         "camera": camera,
         "confidence_threshold": conf,
         "frame_stride": stride,
-        "vehicle_class_recall": tp / max(tp + fn, 1),
-        "matched": tp,
-        "cars": tp + fn,
+        "vehicle_class_recall": float(tp / max(tp + fn, 1)),
+        "matched": int(tp),
+        "cars": int(tp + fn),
         "per_clip": per_clip,
-        "top_predicted_labels": labels.most_common(12),
-        "note": ("COCO classes only; no fine-tuning. A vehicle-class box, when it "
-                 "occurs, still carries no ground contact point, so it cannot "
-                 "produce a track-limit margin."),
+        "top_predicted_labels": [[str(k), int(v)] for k, v in labels.most_common(12)],
+        "total_detections": int(sum(labels.values())),
+        "note": ("COCO classes, no fine-tuning, and a 2% confidence floor -- at any "
+                 "usable threshold the recall collapses. Even here the same car is "
+                 "labelled a bench, a suitcase or a surfboard as readily as a "
+                 "vehicle, and a vehicle-class box carries no ground contact point, "
+                 "so it cannot produce a track-limit margin at all."),
     }
     pathlib.Path(out).write_text(json.dumps(payload, indent=1))
     return payload

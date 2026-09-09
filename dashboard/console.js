@@ -3,9 +3,9 @@
   const DATA = JSON.parse(document.getElementById("vmax-data").textContent);
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-  const m = (v, d = 3) => (v === null || v === undefined || Number.isNaN(v) ? "—" : (v >= 0 ? "+" : "") + v.toFixed(d));
-  const abs = (v, d = 3) => (v === null || v === undefined ? "—" : v.toFixed(d));
-  const pct = (v, d = 1) => (v === null || v === undefined ? "—" : (v * 100).toFixed(d) + "%");
+  const m = (v, d = 3) => (v === null || v === undefined || Number.isNaN(v) ? "\u2014" : (v >= 0 ? "+" : "") + v.toFixed(d));
+  const abs = (v, d = 3) => (v === null || v === undefined ? "\u2014" : v.toFixed(d));
+  const pct = (v, d = 1) => (v === null || v === undefined ? "\u2014" : (v * 100).toFixed(d) + "%");
   const pretty = (s) => s.replace(/_/g, " ").replace("violation ", "excursion ");
   const SVGNS = "http://www.w3.org/2000/svg";
 
@@ -27,29 +27,32 @@
   ].map(([k, v]) => `<span class="chip">${esc(k)} <b>${esc(v)}</b></span>`).join("");
 
   /* ------------------------------------------------------------ headline */
-  const heldOut = DATA.summary["held_out"] || {};
+  const head = DATA.headline || {};
+  const heldOut = DATA.summary["surveyed:held_out"] || DATA.summary["held_out"] || {};
   const surveyed = DATA.summary["mode:surveyed"] || {};
-  const gradErr = DATA.graduated.filter((g) => g.true_peak_m !== null && g.true_peak_m !== undefined)
-    .map((g) => Math.abs(g.detected_peak_m - g.true_peak_m));
-  const medianPeak = gradErr.length ? gradErr.slice().sort((a, b) => a - b)[Math.floor(gradErr.length / 2)] : null;
-  const attributed = DATA.cases.reduce((a, c) => a + (c.attribution.attributed || 0), 0);
-  const attrCorrect = DATA.cases.reduce((a, c) => a + (c.attribution.correct || 0), 0);
+  const medianPeak = head.peak_margin_median_error_m ?? null;
+  const attributed = surveyed.attribution_decided || 0;
+  const attrCorrect = surveyed.attribution_correct || 0;
+  const found = surveyed.events_found || 0;
+  const missed = surveyed.events_missed || 0;
+  const falseAlarms = surveyed.false_alarms || 0;
 
   $("tiles").innerHTML = [
     {
-      v: pct(heldOut.recall ?? surveyed.recall, 1), k: "Car recall, unseen clips",
+      v: `${found}/${found + missed}`, k: "Offences found",
+      n: falseAlarms ? `${falseAlarms} false alarm${falseAlarms === 1 ? "" : "s"}` : "no false alarms",
+    },
+    {
+      v: medianPeak != null ? (medianPeak * 100).toFixed(1) : "\u2014", unit: "cm",
+      k: "Median peak-margin error",
+      n: `${head.graduated_points || 0} readings of excursions driven to 5-60 cm`,
+    },
+    {
+      v: pct(heldOut.recall ?? surveyed.recall, 1), k: "Car recall, withheld clips",
       n: `${heldOut.clips || 0} clips withheld from training entirely`,
     },
     {
-      v: (surveyed.margin_mae_m != null ? surveyed.margin_mae_m.toFixed(3) : "—"), unit: "m",
-      k: "Mean margin error", n: "per frame, against the exact driven margin",
-    },
-    {
-      v: medianPeak != null ? medianPeak.toFixed(3) : "—", unit: "m",
-      k: "Median peak-margin error", n: "across the four graduated excursions",
-    },
-    {
-      v: attributed ? pct(attrCorrect / attributed, 0) : "—", k: "Correct car named",
+      v: attributed ? pct(attrCorrect / attributed, 0) : "\u2014", k: "Correct car named",
       n: `${attrCorrect} of ${attributed} tracks attributed`,
     },
   ].map((t) => `<div class="tile"><div class="v">${t.v}${t.unit ? `<small>${t.unit}</small>` : ""}</div>
@@ -84,17 +87,24 @@
 
   function renderQueue() {
     const rows = visibleCases();
-    if (!rows.some((c) => c.id === state.id)) { state.id = rows.length ? rows[0].id : null; state.car = null; }
+    if (!rows.some((c) => c.id === state.id)) {
+      // Open on a case that shows what the page does: the most confident
+      // reported offence, not the first clean lap in the list.
+      const offence = rows.filter((c) => c.verdict === "offence")
+        .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))[0];
+      state.id = (offence || rows[0] || {}).id || null;
+      state.car = null;
+    }
     $("qlist").innerHTML = rows.map((c) => `
       <button type="button" role="listitem" class="qrow ${verdictClass(c)}" data-id="${esc(c.id)}"
               aria-current="${c.id === state.id}">
         <i class="stripe"></i>
         <span class="body">
           <span class="name">${esc(pretty(c.scenario))}</span>
-          <span class="sub">${esc(c.camera)}${c.held_out ? " · withheld" : ""}</span>
+          <span class="sub">${esc(c.camera)}${c.held_out ? " \u00b7 withheld" : ""}</span>
         </span>
         <span class="right">
-          <span class="marg">${c.peak_margin_detected != null ? m(c.peak_margin_detected) + " m" : "—"}</span>
+          <span class="marg">${c.peak_margin_detected != null ? m(c.peak_margin_detected) + " m" : "\u2014"}</span>
           <span class="conf"><i style="width:${Math.round((c.confidence || 0) * 100)}%"></i></span>
         </span>
       </button>`).join("");
@@ -242,12 +252,12 @@
         <div><span class="badge ${cls}"><i class="dot"></i>${esc(verdictLabel(c))}</span></div>
       </div>
       <div class="facts">
-        <div class="fact"><div class="k">Peak margin</div><div class="v">${ev ? m(ev.peak_margin_m) : "—"}</div></div>
-        <div class="fact"><div class="k">Actually driven</div><div class="v">${tr ? m(tr.peak_margin_m) : (c.peak_margin_true != null ? m(c.peak_margin_true) : "—")}</div></div>
-        <div class="fact"><div class="k">Error</div><div class="v ${ev && tr ? (Math.abs(ev.peak_margin_m - tr.peak_margin_m) < 0.05 ? "good" : "") : ""}">${ev && tr ? m(ev.peak_margin_m - tr.peak_margin_m) : "—"}</div></div>
+        <div class="fact"><div class="k">Peak margin</div><div class="v">${ev ? m(ev.peak_margin_m) : "\u2014"}</div></div>
+        <div class="fact"><div class="k">Actually driven</div><div class="v">${tr ? m(tr.peak_margin_m) : (c.peak_margin_true != null ? m(c.peak_margin_true) : "\u2014")}</div></div>
+        <div class="fact"><div class="k">Error</div><div class="v ${ev && tr ? (Math.abs(ev.peak_margin_m - tr.peak_margin_m) < 0.05 ? "good" : "") : ""}">${ev && tr ? m(ev.peak_margin_m - tr.peak_margin_m) : "\u2014"}</div></div>
         <div class="fact"><div class="k">Frames off track</div><div class="v">${ev ? ev.frame_count : 0}${tr ? ` <small style="color:var(--ink-3)">/ ${tr.frame_count}</small>` : ""}</div></div>
-        <div class="fact"><div class="k">Confidence</div><div class="v">${ev ? pct(conf, 0) : "—"}</div></div>
-        <div class="fact"><div class="k">Car named</div><div class="v sm">${esc(attr.claimed || "unattributed")}${attr.claimed ? (attr.correct ? ' <span class="good">✓</span>' : ' <span class="bad">✗</span>') : ""}</div></div>
+        <div class="fact"><div class="k">Confidence</div><div class="v">${ev ? pct(conf, 0) : "\u2014"}</div></div>
+        <div class="fact"><div class="k">Car named</div><div class="v sm">${esc(attr.claimed || "unattributed")}${attr.claimed ? (attr.correct ? ' <span class="good">\u2713</span>' : ' <span class="bad">\u2717</span>') : ""}</div></div>
       </div>
       <div class="plot">
         <div class="plot-head">
@@ -276,12 +286,12 @@
         <div class="pane">
           <h4>Timing and identity</h4>
           <dl class="kv">
-            <dt>Start of excursion</dt><dd>${ev ? `frame ${ev.start_frame}` : "—"}${tr ? ` <span style="color:var(--ink-3)">(driven ${tr.start_frame})</span>` : ""}</dd>
-            <dt>Duration error</dt><dd>${c.duration_error_frames != null ? `${c.duration_error_frames > 0 ? "+" : ""}${c.duration_error_frames} frames` : "—"}</dd>
-            <dt>Attribution rung</dt><dd>${esc(attr.rung || "—")}</dd>
+            <dt>Start of excursion</dt><dd>${ev ? `frame ${ev.start_frame}` : "\u2014"}${tr ? ` <span style="color:var(--ink-3)">(driven ${tr.start_frame})</span>` : ""}</dd>
+            <dt>Duration error</dt><dd>${c.duration_error_frames != null ? `${c.duration_error_frames > 0 ? "+" : ""}${c.duration_error_frames} frames` : "\u2014"}</dd>
+            <dt>Attribution rung</dt><dd>${esc(attr.rung || "\u2014")}</dd>
             <dt>Detection recall</dt><dd>${pct(c.detection.recall)}</dd>
-            <dt>Contact-point error</dt><dd>${c.detection.mean_contact_error_m != null ? c.detection.mean_contact_error_m.toFixed(3) + " m" : "—"}</dd>
-            <dt>Per-frame margin error</dt><dd>${c.margin.margin_mae_m != null ? c.margin.margin_mae_m.toFixed(3) + " m" : "—"}</dd>
+            <dt>Contact-point error</dt><dd>${c.detection.mean_contact_error_m != null ? c.detection.mean_contact_error_m.toFixed(3) + " m" : "\u2014"}</dd>
+            <dt>Per-frame margin error</dt><dd>${c.margin.margin_mae_m != null ? c.margin.margin_mae_m.toFixed(3) + " m" : "\u2014"}</dd>
           </dl>
           ${suppressedNote(c)}
         </div>
@@ -381,6 +391,10 @@
 
     const byTarget = {};
     pts.forEach((p) => { (byTarget[p.target_m] ||= []).push(p); });
+    const spreads = Object.values(byTarget).map((row) => {
+      const v = row.map((p) => p.detected_peak_m);
+      return v.length > 1 ? Math.max(...v) - Math.min(...v) : 0;
+    });
     $("grad-table").innerHTML = `<h3>Per-excursion readings</h3>
       <p>Reported peak margin from each camera, against the exact value the simulator drove.</p>
       <div class="tablewrap" style="border:0"><table>
@@ -391,27 +405,45 @@
         const errs = got.filter(Boolean).map((p) => p.detected_peak_m);
         const spread = errs.length > 1 ? (Math.max(...errs) - Math.min(...errs)) : null;
         return `<tr><td>${(+t).toFixed(2)} m</td>${got.map((p) =>
-          `<td>${p ? m(p.detected_peak_m) : "—"}</td>`).join("")}<td>${spread != null ? spread.toFixed(3) : "—"}</td></tr>`;
-      }).join("")}</tbody></table></div>`;
+          `<td>${p ? m(p.detected_peak_m) : "\u2014"}</td>`).join("")}<td>${spread != null ? spread.toFixed(3) : "\u2014"}</td></tr>`;
+      }).join("")}</tbody></table></div>
+      <dl class="kv" style="margin-top:14px">
+        <dt>Median error across all twelve readings</dt><dd>${head.peak_margin_median_error_m != null ? (head.peak_margin_median_error_m * 100).toFixed(1) + " cm" : "\u2014"}</dd>
+        <dt>Largest single error</dt><dd>${head.peak_margin_max_error_m != null ? (head.peak_margin_max_error_m * 100).toFixed(1) + " cm" : "\u2014"}</dd>
+        <dt>Widest disagreement between cameras</dt><dd>${(spreads.length ? Math.max(...spreads) * 100 : 0).toFixed(1)} cm</dd>
+      </dl>
+      <p style="margin:10px 0 0;font-size:13px;color:var(--ink-2)">The three cameras agree more closely as the excursion
+      grows: a 5 cm margin is near the limit of what a back-projected contact point resolves, a 60 cm one is not.
+      Every reading here is high rather than low, which is what a peak taken from a noisy series does.</p>`;
   }
 
   /* -------------------------------------------------------- calibration */
   function calibration() {
     const rows = DATA.calibration;
     if (!rows.length) { $("cal-table").innerHTML = ""; return; }
+    const failed = rows.filter((r) => r.failure_mode);
     $("cal-table").innerHTML = `<table>
       <thead><tr><th>Camera</th><th>Position error</th><th>Field of view</th><th>Lateral error</th>
-        <th>p95 lateral</th><th>Along-track offset</th><th>Solve time</th></tr></thead>
+        <th>p95 lateral</th><th>Paint fit</th><th>\u2026at the true camera</th><th>Solve time</th></tr></thead>
       <tbody>${rows.map((r) => `
         <tr>
-          <td>${esc(r.camera)}</td>
-          <td>${r.position_error_m.toFixed(2)} m</td>
-          <td>${r.fov_estimated_deg.toFixed(2)}° <span style="color:var(--ink-3)">/ ${r.fov_true_deg}°</span></td>
+          <td>${esc(r.camera)}${r.failure_mode ? ' <span class="bad">unsolved</span>' : ""}</td>
+          <td class="${r.position_error_m < 3 ? "good" : "bad"}">${r.position_error_m.toFixed(2)} m</td>
+          <td>${r.fov_estimated_deg.toFixed(2)}\u00b0 <span style="color:var(--ink-3)">/ ${r.fov_true_deg}\u00b0</span></td>
           <td class="${r.lateral_error_m < 0.5 ? "good" : "bad"}">${r.lateral_error_m.toFixed(3)} m</td>
           <td>${r.lateral_p95_m.toFixed(3)} m</td>
-          <td>${m(r.along_track_gauge_m, 2)} m</td>
-          <td>${r.seconds != null ? r.seconds.toFixed(0) + " s" : "—"}</td>
-        </tr>`).join("")}</tbody></table>`;
+          <td>${r.paint_agreement != null ? pct(r.paint_agreement, 1) : "\u2014"}</td>
+          <td>${r.paint_agreement_at_truth != null ? pct(r.paint_agreement_at_truth, 1) : "\u2014"}</td>
+          <td>${r.seconds != null ? r.seconds.toFixed(0) + " s" : "\u2014"}</td>
+        </tr>`).join("")}</tbody></table>
+      ${failed.length ? `<div class="note" style="margin:14px 20px 16px">
+        The ${failed.map((r) => esc(r.camera)).join(" and ")} solution settles on a rotation of the corner about its own
+        centre. On a constant-radius bend that reproduces almost the same picture, and the fit scores it
+        ${failed.map((r) => `${pct(r.paint_agreement, 1)} against the true camera's ${pct(r.paint_agreement_at_truth, 1)}`).join("; ")}
+        &mdash; the true camera fits the visible paint <em>worse</em> than the wrong one, so this is a limit of what the
+        picture can show, not a search that gave up. Only the straights break the tie, and this view sees too little of
+        them. Judgements made through that solution are reported here and are unusable, which is the point of reporting
+        them.</div>` : ""}`;
   }
 
   /* ------------------------------------------------------------ baseline */
@@ -422,10 +454,13 @@
     host.innerHTML = `<h3>What an off-the-shelf detector sees</h3>
       <p>${esc(b.weights)} with COCO weights and no fine-tuning, on the ${esc(b.camera)} camera.</p>
       <dl class="kv">
-        <dt>Cars matched as a vehicle class</dt><dd>${b.matched} / ${b.cars}</dd>
-        <dt>Vehicle-class recall</dt><dd class="${b.vehicle_class_recall > 0.5 ? "good" : "bad"}">${pct(b.vehicle_class_recall)}</dd>
-        <dt>Confidence floor used</dt><dd>${b.confidence_threshold}</dd>
+        <dt>Cars boxed as a vehicle class</dt><dd>${b.matched} / ${b.cars}</dd>
+        <dt>Vehicle-class recall</dt><dd>${pct(b.vehicle_class_recall)}</dd>
+        <dt>Boxes drawn in total</dt><dd>${b.total_detections != null ? b.total_detections : "\u2014"}</dd>
+        <dt>Confidence floor</dt><dd>${b.confidence_threshold}</dd>
+        <dt>Ground contact points</dt><dd class="bad">none</dd>
       </dl>
+      <p style="margin:10px 0 4px;font-size:13px">What it called the cars, by frequency:</p>
       <div class="labels">${b.top_predicted_labels.slice(0, 8).map(([k, v]) =>
         `<span><b>${esc(k)}</b> ${v}</span>`).join("")}</div>
       <div class="note">${esc(b.note)}</div>`;

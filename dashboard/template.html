@@ -157,13 +157,13 @@ section { margin-top: 40px; }
 .qrow.offence .stripe { background: var(--offence); }
 .qrow.clear .stripe { background: var(--clear); }
 .qrow.flag .stripe { background: var(--review); }
-.qrow .body { padding: 9px 0; min-width: 0; }
-.qrow .name { font-family: var(--cond); font-weight: 600; font-size: 16px; letter-spacing: .02em; }
-.qrow .sub { font-size: 12px; color: var(--ink-3); font-family: var(--mono); }
-.qrow .right { text-align: right; padding: 9px 0; }
-.qrow .marg { font-family: var(--mono); font-size: 13px; font-weight: 500; }
-.conf { width: 62px; height: 3px; background: var(--surface-3); margin-top: 5px; margin-left: auto; }
-.conf i { display: block; height: 100%; background: var(--ink-2); }
+.qrow .body { display: block; padding: 9px 0; min-width: 0; }
+.qrow .name { display: block; font-family: var(--cond); font-weight: 600; font-size: 16px; letter-spacing: .02em; }
+.qrow .sub { display: block; font-size: 12px; color: var(--ink-3); font-family: var(--mono); }
+.qrow .right { display: block; text-align: right; padding: 9px 0; }
+.qrow .marg { display: block; font-family: var(--mono); font-size: 13px; font-weight: 500; white-space: nowrap; }
+.conf { display: block; width: 62px; height: 3px; background: var(--surface-3); margin: 5px 0 0 auto; overflow: hidden; }
+.conf i { display: block; height: 3px; background: var(--ink-2); }
 .qrow.offence .conf i { background: var(--offence); }
 
 /* ---------- detail ---------- */

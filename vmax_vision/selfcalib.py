@@ -454,6 +454,28 @@ class _GroundResidual:
         return float(np.sqrt(np.mean(r ** 2))) if len(r) else float("nan")
 
 
+def paint_agreement(background_bgr, position, look_at, fov, seed=0):
+    """Score any camera solution by the same measure the fit maximises.
+
+    Used to tell a search failure from an objective failure: if the true camera
+    scores *worse* than the recovered one, no amount of searching would have
+    found it, and the ambiguity is in what the picture can show.
+    """
+    height, width = background_bgr.shape[:2]
+    borders, _masks = class_borders(background_bgr)
+    fields, offsets, _weights = _distance_fields(borders, background_bgr.shape[:2])
+    reverse = _Reverse(borders, offsets, width, height, seed=seed)
+    pts, cls = _model_points(offsets, n=340)
+    theta = _pack(np.asarray(position, float), np.asarray(look_at, float)[:2], float(fov))
+    u, v, front = _project(theta[None], pts, width, height)
+    inside = front & (u >= 0) & (u < width) & (v >= 0) & (v < height)
+    ui = np.clip(u, 0, width - 1).astype(np.int32)
+    vi = np.clip(v, 0, height - 1).astype(np.int32)
+    near = fields[cls[None, :], vi, ui] < 3.0
+    model_cov = float((near & inside).sum() / max(inside.sum(), 1))
+    return (model_cov + reverse.coverage(theta, width, height)) / 2.0
+
+
 def estimate_homography(background_bgr, seed=0, sweep=2000000, keep=2000,
                         finalists=60, refine=6, verbose=False):
     """Fit the ground homography of a fixed camera from one background image.

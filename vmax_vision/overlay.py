@@ -26,8 +26,16 @@ LIMIT = (60, 210, 250)
 
 
 def _polyline(frame, H, world_xy, colour, thickness=2):
+    """Draw a ground curve, breaking it where it passes behind the camera.
+
+    The homography's last row is the projective depth: without this test the
+    track limit reappears mirrored above the horizon, which looks like a
+    detection error and is not one.
+    """
+    world_xy = np.asarray(world_xy, float)
+    depth = world_xy @ np.asarray(H, float)[2, :2] + H[2, 2]
     pts = apply_h(H, world_xy)
-    ok = np.isfinite(pts).all(axis=1) & (np.abs(pts) < 1e5).all(axis=1)
+    ok = (depth > 1e-6) & np.isfinite(pts).all(axis=1) & (np.abs(pts) < 1e5).all(axis=1)
     run = []
     for p, good in zip(pts, ok):
         if good:
@@ -92,7 +100,7 @@ def render_clip(clip, result, out_path, homography, show_limit=True, quality=20)
             cv2.putText(frame, f"{label}  {f['margin_m']:+.3f} m", anchor,
                         FONT, 0.52, colour, 1, cv2.LINE_AA)
 
-        _panel(frame, 18, 18, 470, 30 + 34 * max(len(rows), 1) + 26)
+        _panel(frame, 18, 18, 596, 30 + 34 * max(len(rows), 1) + 26)
         cv2.putText(frame, "VMAX STEWARD  |  track-limit assessment", (32, 44),
                     FONT, 0.56, INK, 1, cv2.LINE_AA)
         cv2.putText(frame, f"{result['scenario']}  {result['camera']}  "
@@ -102,15 +110,19 @@ def render_clip(clip, result, out_path, homography, show_limit=True, quality=20)
         for tid, track, f in rows:
             live = [e for e in events.get(tid, [])
                     if e["start_frame"] <= idx <= e["end_frame_inclusive"]]
-            conf = live[0]["confidence"] if live else 0.0
             label = (track.get("attribution") or {}).get("car_id") or f"track {tid}"
             verdict = "OFF TRACK" if f["is_violation"] else "within limits"
             colour = BAD if f["is_violation"] else GOOD
             cv2.putText(frame, f"{label:<8s} margin {f['margin_m']:+.3f} m   {verdict}",
                         (32, y), FONT, 0.46, colour, 1, cv2.LINE_AA)
-            _bar(frame, 32, y + 8, 260, 6, conf, BAD if conf > 0.5 else WARN)
-            cv2.putText(frame, f"confidence {conf*100:5.1f}%", (302, y + 14),
-                        FONT, 0.40, INK, 1, cv2.LINE_AA)
+            if live:
+                conf = live[0]["confidence"]
+                _bar(frame, 32, y + 8, 260, 6, conf, BAD if conf > 0.5 else WARN)
+                cv2.putText(frame, f"reported offence, confidence {conf*100:.0f}%",
+                            (302, y + 14), FONT, 0.40, INK, 1, cv2.LINE_AA)
+            else:
+                cv2.putText(frame, "no offence reported for this frame", (32, y + 14),
+                            FONT, 0.40, (150, 158, 170), 1, cv2.LINE_AA)
             y += 34
         if not rows:
             cv2.putText(frame, "no car tracked in this frame", (32, y),
