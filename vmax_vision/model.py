@@ -44,13 +44,18 @@ class Residual(nn.Module):
 
 
 class VmaxNet(nn.Module):
-    def __init__(self, width=(28, 56, 88, 128), head=40):
+    def __init__(self, width=(28, 56, 88, 128, 160), head=40):
         super().__init__()
-        c1, c2, c3, c4 = width
+        c1, c2, c3, c4, c5 = width
         self.stem = nn.Sequential(conv_bn(3, 20, 2), conv_bn(20, c1, 2))
         self.down2 = nn.Sequential(conv_bn(c1, c2, 2), Residual(c2), Residual(c2))
         self.down3 = nn.Sequential(conv_bn(c2, c3, 2), Residual(c3), Residual(c3))
         self.down4 = nn.Sequential(conv_bn(c3, c4, 2), Residual(c4))
+        # A fifth stage exists for scale, not capacity: a car filling the frame
+        # is wider than the receptive field of a four-stage stem, so its centre
+        # cell cannot see the whole object and the heatmap never peaks there.
+        self.down5 = nn.Sequential(conv_bn(c4, c5, 2), Residual(c5))
+        self.lat5 = nn.Conv2d(c5, head, 1)
         self.lat3 = nn.Conv2d(c3, head, 1)
         self.lat2 = nn.Conv2d(c2, head, 1)
         self.lat1 = nn.Conv2d(c1, head, 1)
@@ -69,8 +74,9 @@ class VmaxNet(nn.Module):
         f2 = self.down2(f1)
         f3 = self.down3(f2)
         f4 = self.down4(f3)
-        p = self.lat4(f4)
-        for lat, feat in ((self.lat3, f3), (self.lat2, f2), (self.lat1, f1)):
+        f5 = self.down5(f4)
+        p = self.lat5(f5)
+        for lat, feat in ((self.lat4, f4), (self.lat3, f3), (self.lat2, f2), (self.lat1, f1)):
             p = F.interpolate(p, size=feat.shape[-2:], mode="nearest") + lat(feat)
         p = self.smooth(p)
         return {
@@ -103,19 +109,27 @@ def gather_at(feature, index):
     return flat.gather(2, idx).permute(0, 2, 1)
 
 
-def detection_loss(out, target, weights=(1.0, 3.0, 0.5, 2.0, 1.0)):
+def detection_loss(out, target, weights=(1.0, 3.0, 1.5, 2.0, 1.0)):
     w_heat, w_contact, w_size, w_offset, w_mask = weights
     valid = target["valid"]
     n = valid.sum().clamp(min=1.0)
+    # Contacts are regressed in absolute pixels but scored relative to the car's
+    # own size, so a frame-filling car and a distant one contribute comparably.
+    # Absolute pixels stay the prediction, so contact accuracy never inherits
+    # the size head's error.
+    scale = target["contact_norm"].unsqueeze(-1)
 
     loss_heat = focal_loss(out["heat"], target["heat"])
     loss_mask = F.binary_cross_entropy_with_logits(out["mask"], target["mask"])
 
-    def masked_l1(pred_map, key):
+    def masked_l1(pred_map, key, weight=None):
         pred = gather_at(pred_map, target["index"])
-        return (torch.abs(pred - target[key]) * valid.unsqueeze(-1)).sum() / (n * pred.shape[-1])
+        err = torch.abs(pred - target[key]) * valid.unsqueeze(-1)
+        if weight is not None:
+            err = err * weight
+        return err.sum() / (n * pred.shape[-1])
 
-    loss_contact = masked_l1(out["contacts"], "contacts")
+    loss_contact = masked_l1(out["contacts"], "contacts", scale)
     loss_size = masked_l1(out["size"], "size")
     loss_offset = masked_l1(out["offset"], "offset")
     total = (w_heat * loss_heat + w_contact * loss_contact + w_size * loss_size

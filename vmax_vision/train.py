@@ -22,7 +22,7 @@ def to_torch(batch):
     image = torch.from_numpy(batch["image"]).permute(0, 3, 1, 2).float()
     image = (image - 114.0) / 58.0
     target = {k: torch.from_numpy(batch[k]) for k in
-              ("heat", "mask", "index", "valid", "size", "offset", "contacts")}
+              ("heat", "mask", "index", "valid", "size", "offset", "contacts", "contact_norm")}
     return image.contiguous(memory_format=torch.channels_last), target
 
 
@@ -53,7 +53,9 @@ def main(argv=None):
     history = []
     if args.resume:
         blob = torch.load(args.resume, map_location="cpu", weights_only=False)
-        model.load_state_dict(blob["model"])
+        missing, unexpected = model.load_state_dict(blob["model"], strict=False)
+        if missing:
+            print(f"new layers initialised fresh: {', '.join(sorted({k.split('.')[0] for k in missing}))}", flush=True)
         print(f"resumed {args.resume} at step {blob.get('step')}", flush=True)
         log = OUT / "training_log.json"
         if log.exists():

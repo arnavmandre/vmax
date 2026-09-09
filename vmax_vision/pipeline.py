@@ -14,14 +14,48 @@ from __future__ import annotations
 
 import json
 import pathlib
+import pickle
 from dataclasses import asdict
 
+import cv2
 import numpy as np
 
 from . import boundary, clips as clipmod, driver_id, tracker as tracking
 from .calib import Camera
 
 SELF_CALIBRATION = pathlib.Path("pipeline_out/self_calibration.json")
+DETECTION_CACHE = pathlib.Path("pipeline_out/detections")
+
+
+def detect_clip(clip, detector, cache=True, progress=None):
+    """Detections for every frame, cached so a clip is judged under more than
+    one calibration without paying for inference twice."""
+    name = getattr(detector, "name", type(detector).__name__)
+    path = DETECTION_CACHE / f"{clip.scenario}__{clip.camera}__{name}.pkl"
+    if cache and path.exists():
+        with path.open("rb") as fh:
+            blob = pickle.load(fh)
+        if blob.get("frames") and blob.get("weights") == getattr(detector, "weights", None):
+            frames = {k: cv2.imdecode(v, cv2.IMREAD_COLOR) for k, v in blob["frames"].items()}
+            return blob["detections"], frames
+
+    per_frame, frames_bgr = [], {}
+    for idx, frame in clip.frames():
+        per_frame.append(detector(frame))
+        if idx % 4 == 0:
+            frames_bgr[idx] = frame
+        if progress:
+            progress(idx)
+    if cache:
+        DETECTION_CACHE.mkdir(parents=True, exist_ok=True)
+        # The kept frames are only for livery sampling, so they cache as JPEG.
+        encoded = {k: cv2.imencode(".jpg", v, [cv2.IMWRITE_JPEG_QUALITY, 92])[1]
+                   for k, v in frames_bgr.items()}
+        with path.open("wb") as fh:
+            pickle.dump({"detections": per_frame, "frames": encoded,
+                         "weights": getattr(detector, "weights", None)}, fh,
+                        protocol=pickle.HIGHEST_PROTOCOL)
+    return per_frame, frames_bgr
 
 
 def load_homography(camera_name, mode="surveyed", cameras=None):
@@ -36,7 +70,7 @@ def load_homography(camera_name, mode="surveyed", cameras=None):
 
 
 def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
-             bridge=2, keep_frames=False, progress=None):
+             bridge=2, cache=True, progress=None):
     """Run the whole stack over one clip and return a plain-dict result."""
     cameras = cameras or Camera.load_all()
     if clip.moving_camera:
@@ -44,17 +78,7 @@ def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
     H, sigma_calibration, calibration_label = load_homography(clip.camera, mode, cameras)
     H_inv = np.linalg.inv(H)
 
-    per_frame, frames_bgr = [], {}
-    for idx, frame in clip.frames():
-        dets = detector(frame)
-        per_frame.append(dets)
-        if keep_frames:
-            frames_bgr[idx] = frame
-        else:
-            frames_bgr[idx] = frame if idx % 4 == 0 else None
-        if progress:
-            progress(idx, dets)
-    frames_bgr = {k: v for k, v in frames_bgr.items() if v is not None}
+    per_frame, frames_bgr = detect_clip(clip, detector, cache=cache, progress=progress)
 
     tracked, _tracker = tracking.run(per_frame)
     by_track: dict[int, dict] = {}

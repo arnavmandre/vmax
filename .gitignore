@@ -4,3 +4,4 @@ __pycache__/
 *.pt
 !pipeline_out/vmaxnet.pt
 pipeline_out/runs/
+pipeline_out/detections/

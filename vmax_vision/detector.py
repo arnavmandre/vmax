@@ -19,7 +19,19 @@ import torch.nn.functional as F
 from .model import CONTACT_SCALE, STRIDE, VmaxNet
 
 
-def _pad_to(image, multiple=32):
+def crop_mask(mask, box):
+    """The instance silhouette, clipped to the integer box it belongs to."""
+    h, w = mask.shape
+    x0 = int(max(np.floor(box[0]), 0))
+    y0 = int(max(np.floor(box[1]), 0))
+    x1 = int(min(np.ceil(box[2]) + 1, w))
+    y1 = int(min(np.ceil(box[3]) + 1, h))
+    if x1 <= x0 or y1 <= y0:
+        return {"origin": [x0, y0], "data": np.zeros((0, 0), bool)}
+    return {"origin": [x0, y0], "data": np.ascontiguousarray(mask[y0:y1, x0:x1])}
+
+
+def _pad_to(image, multiple=64):
     h, w = image.shape[:2]
     ph, pw = (-h) % multiple, (-w) % multiple
     if ph or pw:
@@ -61,7 +73,7 @@ class VmaxDetector:
 
         mask_prob = torch.sigmoid(out["mask"])[0, 0].numpy()
         mask_full = cv2.resize(mask_prob, (padded.shape[1], padded.shape[0]),
-                               interpolation=cv2.INTER_LINEAR)[:h, :w]
+                               interpolation=cv2.INTER_LINEAR)[:h, :w] > 0.5
 
         detections = []
         for y, x in zip(ys.tolist(), xs.tolist()):
@@ -81,7 +93,11 @@ class VmaxDetector:
                 "box": box.tolist(),
                 "centre": [cx, cy],
                 "contacts_uv": contacts.tolist(),
-                "mask": (mask_full > 0.5),
+                # Only the silhouette inside the box is ever used (livery
+                # sampling), and keeping it box-aligned makes a whole clip's
+                # detections small enough to cache and re-judge under a
+                # different calibration without re-running the network.
+                "mask_crop": crop_mask(mask_full, box),
             })
         detections.sort(key=lambda d: -d["score"])
         return detections
@@ -114,16 +130,17 @@ class CocoYoloDetector:
             if cls not in self.VEHICLE_CLASSES:
                 continue
             box = res.boxes.xyxy[i].numpy()
-            mask = None
+            mask_crop = None
             if masks is not None and i < len(masks):
-                mask = cv2.resize(masks[i], (frame_bgr.shape[1], frame_bgr.shape[0])) > 0.5
+                full = cv2.resize(masks[i], (frame_bgr.shape[1], frame_bgr.shape[0])) > 0.5
+                mask_crop = crop_mask(full, box)
             detections.append({
                 "score": float(res.boxes.conf[i]),
                 "box": box.tolist(),
                 "centre": [float((box[0] + box[2]) / 2), float((box[1] + box[3]) / 2)],
                 "contacts_uv": None,
                 "coco_class": self.VEHICLE_CLASSES[cls],
-                "mask": mask,
+                "mask_crop": mask_crop,
             })
         detections.sort(key=lambda d: -d["score"])
         return detections

@@ -51,11 +51,14 @@ def _hue_signature(frame_bgr, det, max_pixels=4000):
     if x1 <= x0 or y1 <= y0:
         return None
     patch = frame_bgr[y0:y1, x0:x1]
-    mask = det.get("mask")
-    if mask is not None:
-        sel = np.asarray(mask)[y0:y1, x0:x1]
-    else:
-        sel = np.ones(patch.shape[:2], bool)
+    sel = np.ones(patch.shape[:2], bool)
+    crop = det.get("mask_crop")
+    if crop is not None and np.size(crop["data"]):
+        ox, oy = crop["origin"]
+        data = np.asarray(crop["data"])
+        sub = data[y0 - oy:y1 - oy, x0 - ox:x1 - ox]
+        if sub.shape == sel.shape:
+            sel = sub
     hsv = cv2.cvtColor(patch, cv2.COLOR_BGR2HSV)
     sel = sel & (hsv[:, :, 1] > 70) & (hsv[:, :, 2] > 55)
     if sel.sum() < 12:

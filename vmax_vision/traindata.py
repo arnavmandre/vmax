@@ -39,7 +39,7 @@ def draw_gaussian(heat, cx, cy, radius):
 class CropSampler:
     """Random scaled crops around the cars, plus a share of empty background."""
 
-    def __init__(self, samples, crop=384, seed=0, scale=(0.6, 1.7),
+    def __init__(self, samples, crop=384, seed=0, scale=(0.5, 4.5),
                  background_share=0.15, perspective=0.11):
         self.samples = samples
         self.crop = crop
@@ -71,7 +71,10 @@ class CropSampler:
         rec = self.samples[i]
         img = self._image(i)
         h, w = img.shape[:2]
-        scale = float(self.rng.uniform(*self.scale))
+        # Log-uniform: the held-out viewpoint puts cars an order of magnitude
+        # larger than the training cameras do, so scale has to be sampled across
+        # decades rather than linearly around 1.
+        scale = float(np.exp(self.rng.uniform(np.log(self.scale[0]), np.log(self.scale[1]))))
         crop = self.crop
         want = crop / scale
 
@@ -112,6 +115,7 @@ class CropSampler:
         size = np.zeros((MAX_INSTANCES, 2), np.float32)
         offset = np.zeros((MAX_INSTANCES, 2), np.float32)
         contacts = np.zeros((MAX_INSTANCES, 8), np.float32)
+        contact_norm = np.zeros(MAX_INSTANCES, np.float32)
 
         n = 0
         for inst in rec["instances"]:
@@ -136,6 +140,7 @@ class CropSampler:
             size[n] = (bw / STRIDE, bh / STRIDE)
             offset[n] = (fx - ix, fy - iy)
             contacts[n] = ((to_crop(inst["contacts_uv"]) - (ccx, ccy)) / CONTACT_SCALE).reshape(-1)
+            contact_norm[n] = CONTACT_SCALE / max(float(np.hypot(bw, bh)), 8.0)
             n += 1
 
         mask_small = cv2.resize(mask, (out, out), interpolation=cv2.INTER_AREA).astype(np.float32)
@@ -148,6 +153,7 @@ class CropSampler:
             "size": size,
             "offset": offset,
             "contacts": contacts,
+            "contact_norm": contact_norm,
         }
 
     def batch(self, n):
