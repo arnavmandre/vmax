@@ -86,6 +86,8 @@ def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
         "calibration_mode": mode,
         "calibration_label": calibration_label,
         "calibration_sigma_m": sigma_calibration,
+        "sustained_min_frames": min_frames,
+        "sustained_bridge_frames": bridge,
         "frames": len(per_frame),
         "detections_per_frame": [len(d) for d in per_frame],
         "tracks": {

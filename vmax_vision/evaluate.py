@@ -187,7 +187,13 @@ def _nearest_car(track, truth):
 
 
 def event_metrics(result, clip):
-    """Event-level agreement: did we call the same offences, at the same time?"""
+    """Event-level agreement: did we call the same offences, at the same time?
+
+    A truth event shorter than the sustained-frame threshold is separated out
+    rather than counted as a miss: declining to report it is the rule working,
+    which is the whole reason ``sustained_vs_blip`` exists.
+    """
+    min_frames = result.get("sustained_min_frames", 3)
     truth, events = _truth_margins(clip)
     rows = []
     matched_truth = set()
@@ -221,9 +227,15 @@ def event_metrics(result, clip):
     for car, info in events.items():
         for k, te in enumerate(info.get("events", [])):
             if (car, k) not in matched_truth:
-                missed.append({"car_id": car, "truth": te})
-    return {"detected_events": rows, "missed_events": missed,
-            "true_event_count": sum(len(v.get("events", [])) for v in events.values())}
+                missed.append({"car_id": car, "truth": te,
+                               "below_sustained_threshold": te["frame_count"] < min_frames})
+    return {
+        "detected_events": rows,
+        "missed_events": [m for m in missed if not m["below_sustained_threshold"]],
+        "correctly_suppressed_events": [m for m in missed if m["below_sustained_threshold"]],
+        "sustained_min_frames": min_frames,
+        "true_event_count": sum(len(v.get("events", [])) for v in events.values()),
+    }
 
 
 def attribution_metrics(result, clip):
