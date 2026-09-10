@@ -97,6 +97,16 @@ def _livery_match(signature):
     return best[0], confidence, {"distances": dist, "signature_rgb": [float(v) for v in signature]}
 
 
+def _disjoint(a, b, tolerance=1):
+    """True when two tracks never held the circuit at the same time."""
+    if not a or not b:
+        return True
+    lo_a, hi_a = min(a), max(a)
+    lo_b, hi_b = min(b), max(b)
+    overlap = min(hi_a, hi_b) - max(lo_a, lo_b) + 1
+    return overlap <= tolerance
+
+
 def attribute(track_frames, frames_bgr, judgements_by_track, fps=24.0):
     """Attribute every track in a clip, walking down the ladder as needed.
 
@@ -135,10 +145,21 @@ def attribute(track_frames, frames_bgr, judgements_by_track, fps=24.0):
         frames_voting = len(picks)
         confidence = float(np.clip(share * (1 - np.exp(-frames_voting / 12.0)), 0, 1))
         if best in claimed:
-            # Two tracks claiming one car: the weaker one drops to the next rung.
+            # Two tracks claiming one car is only a conflict if both were on
+            # track at the same time. Tracks that never coexist are one car the
+            # tracker lost and picked up again -- that is the continuity rung,
+            # and treating it as a conflict reports a single excursion twice.
+            other = claimed[best]
+            if _disjoint(track_frames[tid], track_frames[other]):
+                attributions[tid] = Attribution(
+                    tid, best, "continuity", float(np.clip(confidence, 0, 1)),
+                    {"reason": f"resumes track {other}; the two never overlap",
+                     "share": float(share), "voting_frames": frames_voting})
+                continue
             attributions[tid] = Attribution(tid, None, "livery", 0.0,
-                                            {"reason": f"{best} already claimed by track {claimed[best]}",
-                                             "share": share})
+                                            {"reason": f"{best} already claimed by track {other},"
+                                                       " and both were on track together",
+                                             "livery_vote": best, "share": float(share)})
             continue
         claimed[best] = tid
         attributions[tid] = Attribution(

@@ -110,7 +110,10 @@ def cmd_demo(args):
             print(f"    frames        {ev['start_frame']}-{ev['end_frame_inclusive']}"
                   f"  ({ev['frame_count']} off track, {ev['start_time_s']:.2f}-{ev['end_time_exclusive_s']:.2f} s)")
             print(f"    peak margin   {ev['peak_margin_m']:+.3f} m beyond the white line")
-            print(f"    confidence    {ev['confidence'] * 100:.0f}%")
+            print(f"    detection     {ev['confidence'] * 100:.0f}% confident this is a real excursion")
+            print(f"    driver ID     {ev['driver_confidence'] * 100:.0f}% confident it was {car}")
+            print(f"    INCIDENT      {ev['incident_score'] * 100:.0f}%"
+                  "   (detection x driver ID -- a shaky identification drags it down)")
             if actual:
                 a = actual[0]
                 print(f"    ground truth  frames {a['start_frame']}-{a['end_frame_inclusive']}, "
@@ -126,6 +129,124 @@ def cmd_demo(args):
                       f"peaking at {a['peak_margin_m']:+.3f} m")
     print()
     return 0
+
+
+def cmd_batch(args):
+    """Judge many clips and print one row each: verdict, margin, truth, error.
+
+    This is the demo view -- it shows the system working across a whole session
+    rather than on one hand-picked clip, and puts the answer next to the truth
+    on every line so nothing has to be taken on trust.
+    """
+    import time
+    import numpy as np
+    from . import clips as clipmod
+    from .pipeline import run_clip
+
+    pool = [c for c in clipmod.discover(include_race_pace=False)
+            if (not args.cameras or c.camera in args.cameras)
+            and (not args.scenarios or c.scenario in args.scenarios)]
+    if not pool:
+        print("no clips matched those filters")
+        return 1
+    detector = _detector(args)
+
+    head = (f"{'CLIP':<34}{'VERDICT':<13}{'REPORTED':>10}{'TRUTH':>10}"
+            f"{'ERROR':>9}{'DETECT':>8}{'DRIVER':>8}{'INCIDENT':>10}{'CAR':>9}   ")
+    print()
+    print(head)
+    print("-" * (len(head) + 2))
+
+    peak_errors, found, missed, false_alarms, suppressed, unnamed = [], 0, 0, 0, 0, 0
+    named_right = named_total = 0
+    started = time.time()
+    for clip in pool:
+        result = run_clip(clip, detector, mode=args.mode, cache=not args.no_cache)
+        truth = clip.ground_truth()["events"]
+        true_events = [(car, e) for car, info in truth.items() for e in info.get("events", [])]
+        rows = []
+        for tid, track in sorted(result["tracks"].items()):
+            car = (track.get("attribution") or {}).get("car_id")
+            actual = _nearest_truth_car(track, clip)
+            if car and actual:
+                named_total += 1
+                named_right += int(car == actual)
+            for ev in track["events"]:
+                # Only a named car is matched against a truth event. An
+                # unattributed track is shown as unnamed rather than quietly
+                # borrowing the answer -- declining to name is the design, and
+                # a steward needs to see which reports carry a name.
+                match = next((e for c, e in true_events if car and c == car
+                              and e["end_frame_inclusive"] >= ev["start_frame"]
+                              and e["start_frame"] <= ev["end_frame_inclusive"]), None)
+                rows.append((car, ev, match))
+
+        reported = sorted(rows, key=lambda r: -r[1]["confidence"])
+        for car, ev, match in reported:
+            if match:
+                found += 1
+                err = ev["peak_margin_m"] - match["peak_margin_m"]
+                peak_errors.append(abs(err))
+                mark = "ok" if abs(err) < 0.10 else "!!"
+                print(f"{clip.key:<34}{'OFFENCE':<13}{ev['peak_margin_m']:>+10.3f}"
+                      f"{match['peak_margin_m']:>+10.3f}{err:>+9.3f}"
+                      f"{ev['confidence']*100:>7.0f}%{ev['driver_confidence']*100:>7.0f}%"
+                      f"{ev['incident_score']*100:>9.0f}%{car:>9}   {mark}")
+            elif car is None:
+                unnamed += 1
+                print(f"{clip.key:<34}{'for review':<13}{ev['peak_margin_m']:>+10.3f}"
+                      f"{'-':>10}{'-':>9}{ev['confidence']*100:>7.0f}%{'0%':>8}{'0%':>10}"
+                      f"{'unnamed':>9}   ?   (no confident identification, escalated)")
+            else:
+                false_alarms += 1
+                print(f"{clip.key:<34}{'FALSE ALARM':<13}{ev['peak_margin_m']:>+10.3f}"
+                      f"{'-':>10}{'-':>9}{ev['confidence']*100:>7.0f}%"
+                      f"{ev['driver_confidence']*100:>7.0f}%{ev['incident_score']*100:>9.0f}%"
+                      f"{car:>9}   !!")
+        for car, e in true_events:
+            if any(m and m["start_frame"] == e["start_frame"] for _c, _ev, m in reported):
+                continue
+            if e["frame_count"] < result.get("sustained_min_frames", 3):
+                suppressed += 1
+                print(f"{clip.key:<34}{'blip ignored':<13}{'-':>10}{e['peak_margin_m']:>+10.3f}"
+                      f"{'-':>9}{'-':>8}{'-':>8}{'-':>10}{car:>9}   ok  "
+                      f"({e['frame_count']} frames, below the sustained threshold)")
+            else:
+                missed += 1
+                print(f"{clip.key:<34}{'MISSED':<13}{'-':>10}{e['peak_margin_m']:>+10.3f}"
+                      f"{'-':>9}{'-':>8}{'-':>8}{'-':>10}{car:>9}   !!")
+        if not reported and not true_events:
+            print(f"{clip.key:<34}{'no offence':<13}{'-':>10}{'-':>10}{'-':>9}"
+                  f"{'-':>8}{'-':>8}{'-':>10}{'-':>9}   ok")
+
+    print("-" * (len(head) + 2))
+    total = found + missed
+    print(f"{len(pool)} clips  |  {found}/{total} offences found  |  {false_alarms} false alarms"
+          f"  |  {suppressed} blips correctly ignored  |  {unnamed} escalated unnamed")
+    if peak_errors:
+        print(f"peak-margin error: median {np.median(peak_errors)*100:.1f} cm, "
+              f"worst {max(peak_errors)*100:.1f} cm")
+    if named_total:
+        print(f"car named correctly: {named_right}/{named_total}")
+    print(f"{time.time()-started:.0f} s")
+    print()
+    return 0
+
+
+def _nearest_truth_car(track, clip):
+    """Which car this track actually followed, by nearest world position."""
+    import numpy as np
+    gt = clip.ground_truth()
+    per_car = {}
+    for row in gt["frames"]:
+        per_car.setdefault(row["car_id"], {})[row["frame_idx"]] = row["world_position"]
+    best, best_d = None, 1e9
+    for car, frames in per_car.items():
+        d = [float(np.linalg.norm(np.array(frames[f["frame_idx"]]) - np.array(f["position_m"])))
+             for f in track["frames"][:40] if f["frame_idx"] in frames]
+        if d and sum(d) / len(d) < best_d:
+            best, best_d = car, sum(d) / len(d)
+    return best if best_d < 4.0 else None
 
 
 def cmd_evaluate(args):
@@ -193,6 +314,17 @@ def main(argv=None):
     p.add_argument("--threshold", type=float, default=0.25)
     p.add_argument("--mode", choices=["surveyed", "self"], default="surveyed")
     p.set_defaults(func=cmd_demo)
+
+    p = sub.add_parser("batch", help="judge many clips and print a verdict table")
+    p.add_argument("--cameras", nargs="*", default=None)
+    p.add_argument("--scenarios", nargs="*", default=None)
+    p.add_argument("--detector", choices=["vmaxnet", "yolo-coco"], default="vmaxnet")
+    p.add_argument("--weights", default="pipeline_out/vmaxnet.pt")
+    p.add_argument("--threshold", type=float, default=0.25)
+    p.add_argument("--mode", choices=["surveyed", "self"], default="surveyed")
+    p.add_argument("--no-cache", action="store_true",
+                   help="recompute detections instead of reusing the cache")
+    p.set_defaults(func=cmd_batch)
 
     p = sub.add_parser("evaluate", help="score pipeline output against the labels")
     p.add_argument("--runs", default="pipeline_out/runs")

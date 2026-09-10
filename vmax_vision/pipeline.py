@@ -88,7 +88,7 @@ def load_homography(camera_name, mode="surveyed", cameras=None):
 
 
 def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
-             bridge=2, cache=True, progress=None):
+             bridge=4, cache=True, progress=None):
     """Run the whole stack over one clip and return a plain-dict result."""
     cameras = cameras or Camera.load_all()
     if clip.moving_camera:
@@ -106,18 +106,48 @@ def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
                 continue
             by_track.setdefault(tid, {})[idx] = det
 
-    judgements, events = {}, {}
+    # Judge each track once, so the attribution ladder has a trajectory to
+    # reason about, then attribute.
+    per_track = {tid: boundary.judge_clip(frames, H_inv, fps=clip.fps)
+                 for tid, frames in by_track.items()}
+    attributions = driver_id.attribute(by_track, frames_bgr, per_track, fps=clip.fps)
+
+    # An incident belongs to a car, not to a track id. If the tracker split one
+    # car into two ids, judging each separately reports one excursion twice and
+    # understates both. Regroup the detections under the attributed car and
+    # judge the car's whole trajectory in one pass.
+    grouped: dict[str, dict] = {}
+    members: dict[str, list] = {}
     for tid, frames in by_track.items():
+        attribution = attributions.get(tid)
+        # Group by what the paint says, then let the ladder decide the name.
+        # Two overlapping tracks whose livery vote agrees are one car, however
+        # the ladder resolved the conflict between them.
+        car = attribution.car_id if attribution else None
+        if car is None and attribution is not None:
+            car = (attribution.evidence or {}).get("livery_vote")
+        key = car or f"track {tid}"
+        target = grouped.setdefault(key, {})
+        members.setdefault(key, []).append(tid)
+        for idx, det in frames.items():
+            if idx not in target or det["score"] > target[idx]["score"]:
+                target[idx] = det
+
+    grouped, members = _merge_coincident(grouped, members, H_inv)
+
+    judgements, events = {}, {}
+    for key, frames in grouped.items():
         js = boundary.judge_clip(frames, H_inv, fps=clip.fps)
         sigma_lateral = boundary.lateral_noise(js)
         evs = boundary.find_events(js, min_frames=min_frames, bridge=bridge, fps=clip.fps)
+        attribution = _merged_attribution(key, members[key], attributions)
+        driver_confidence = (attribution or {}).get("confidence", 0.0)
         for ev in evs:
             boundary.score_event(ev, js, sigma_lateral, sigma_calibration,
                                  fps=clip.fps, min_frames=min_frames)
-        judgements[tid] = js
-        events[tid] = evs
-
-    attributions = driver_id.attribute(by_track, frames_bgr, judgements, fps=clip.fps)
+            boundary.apply_driver_confidence(ev, driver_confidence)
+        judgements[key] = js
+        events[key] = evs
 
     return {
         "clip": clip.key,
@@ -133,9 +163,10 @@ def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
         "frames": len(per_frame),
         "detections_per_frame": [len(d) for d in per_frame],
         "tracks": {
-            str(tid): {
-                "attribution": asdict(attributions[tid]) if tid in attributions else None,
-                "lateral_noise_m": boundary.lateral_noise(judgements[tid]),
+            str(key): {
+                "attribution": _merged_attribution(key, members[key], attributions),
+                "track_ids": members[key],
+                "lateral_noise_m": boundary.lateral_noise(judgements[key]),
                 "frames": [
                     {
                         "frame_idx": j.frame_idx,
@@ -150,13 +181,66 @@ def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
                         "is_violation": j.is_violation,
                         "contacts_world": j.fitted_contacts.tolist(),
                     }
-                    for j in judgements[tid]
+                    for j in judgements[key]
                 ],
-                "events": [asdict(e) for e in events[tid]],
+                "events": [asdict(e) for e in events[key]],
             }
-            for tid in judgements
+            for key in judgements
         },
     }
+
+
+def _merge_coincident(grouped, members, H_inv, radius_m=2.5, share=0.6):
+    """Fold an unnamed group into a named one when they are the same car.
+
+    Image-space suppression cannot do this: two cars racing side by side overlap
+    heavily in the picture. On the ground they never do -- a formula car is
+    under 2 m wide -- so world-space coincidence is an unambiguous test for one
+    car tracked twice.
+    """
+    named = [k for k in grouped if not k.startswith("track ")]
+    unnamed = [k for k in grouped if k.startswith("track ")]
+    if not named or not unnamed:
+        return grouped, members
+
+    def centres(frames):
+        out = {}
+        for idx, det in frames.items():
+            world = boundary.back_project(det["contacts_uv"], H_inv)
+            out[idx] = world.mean(axis=0)
+        return out
+
+    named_centres = {k: centres(grouped[k]) for k in named}
+    for key in unnamed:
+        mine = centres(grouped[key])
+        for other in named:
+            shared = set(mine) & set(named_centres[other])
+            if not shared:
+                continue
+            close = sum(np.linalg.norm(mine[i] - named_centres[other][i]) < radius_m
+                        for i in shared)
+            if close >= share * len(shared):
+                for idx, det in grouped[key].items():
+                    if idx not in grouped[other] or det["score"] > grouped[other][idx]["score"]:
+                        grouped[other][idx] = det
+                members[other].extend(members.pop(key))
+                grouped.pop(key)
+                break
+    return grouped, members
+
+
+def _merged_attribution(key, track_ids, attributions):
+    """The attribution for a merged group: the strongest of its tracks'."""
+    claims = [attributions[t] for t in track_ids if t in attributions]
+    named = [a for a in claims if a.car_id]
+    best = max(named, key=lambda a: a.confidence) if named else (claims[0] if claims else None)
+    if best is None:
+        return None
+    out = asdict(best)
+    if len(track_ids) > 1:
+        out["evidence"] = dict(out.get("evidence") or {},
+                               merged_from_tracks=sorted(track_ids))
+    return out
 
 
 def run_all(detector, mode="surveyed", scenarios=None, cameras_wanted=None,

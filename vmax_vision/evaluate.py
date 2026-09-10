@@ -147,7 +147,7 @@ def margin_metrics(result, clip):
             rows.append({
                 "frame_idx": f["frame_idx"],
                 "car_id": car,
-                "track_id": int(tid),
+                "group": str(tid),
                 "detected_margin_m": f["margin_m"],
                 "true_margin_m": t["margin_m"],
                 "detected_violation": f["is_violation"],
@@ -208,7 +208,7 @@ def event_metrics(result, clip):
                 if overlap > best_overlap:
                     best, best_overlap = k, overlap
             row = {
-                "track_id": int(tid), "car_id": car,
+                "group": str(tid), "car_id": car,
                 "detected": {k: ev[k] for k in
                              ("start_frame", "end_frame_inclusive", "frame_count",
                               "peak_margin_m", "confidence")},
@@ -246,7 +246,7 @@ def attribution_metrics(result, clip):
         attribution = track.get("attribution") or {}
         actual = _nearest_car(track, truth)
         rows.append({
-            "track_id": int(tid),
+            "group": str(tid),
             "claimed": attribution.get("car_id"),
             "actual": actual,
             "rung": attribution.get("rung"),

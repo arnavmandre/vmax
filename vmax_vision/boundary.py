@@ -46,6 +46,8 @@ class Event:
     mean_score: float
     confidence: float = 0.0
     confidence_terms: dict = field(default_factory=dict)
+    driver_confidence: float = 0.0
+    incident_score: float = 0.0
 
 
 def back_project(contacts_uv, H_inv):
@@ -129,8 +131,15 @@ def lateral_noise(judgements):
     return float(np.clip(sigma, 0.005, 1.0))
 
 
-def find_events(judgements, min_frames=3, bridge=2, fps=24.0):
-    """Sustained runs of offence frames, bridging brief detector dropouts."""
+def find_events(judgements, min_frames=3, bridge=4, fps=24.0):
+    """Sustained runs of offence frames, bridging brief detector dropouts.
+
+    ``bridge`` is what separates one excursion from two. Four frames is a sixth
+    of a second at 24 fps: long enough to span a dropout where the detector lost
+    the contact points mid-excursion, far short of the thirty-frame excursions
+    being measured, and too short to join the isolated two-frame blip to
+    anything.
+    """
     flags = {j.frame_idx: j for j in judgements}
     idxs = sorted(flags)
     events, run = [], []
@@ -167,6 +176,19 @@ def find_events(judgements, min_frames=3, bridge=2, fps=24.0):
             peak_margin_m=float(np.median(top)), peak_frame=int(peak.frame_idx),
             mean_score=float(np.mean([m.score for m in members]))))
     return out
+
+
+def apply_driver_confidence(event, driver_confidence):
+    """Fold identification into the incident score, by multiplying.
+
+    A steward cannot act on "a car went off" -- the incident is only actionable
+    once it is pinned on someone. Multiplying rather than averaging means a
+    shaky identification drags the whole incident down instead of being smoothed
+    over by a confident measurement, so the two are never traded off.
+    """
+    event.driver_confidence = float(np.clip(driver_confidence, 0.0, 1.0))
+    event.incident_score = float(event.confidence * event.driver_confidence)
+    return event
 
 
 def _phi(z):

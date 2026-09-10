@@ -11,12 +11,12 @@ fact; nothing in the judgement path reads a per-frame label.
 | Clips | 12 | 12 |
 | Car recall | 0.862 | 0.943 |
 | Precision | 0.995 | 1.000 |
-| Offences found | 12 / 12 | 8 / 8 |
+| Offences found | 11 / 11 | 8 / 8 |
 | False alarms | 0 | 0 |
 | Mean per-frame margin error | 0.204 m | 0.148 m |
-| Car correctly named | 18 / 19 | 12 / 12 |
+| Car correctly named | 18 / 18 | 12 / 12 |
 
-Across all 24 clips judged from the surveyed calibration: **20 of 20 offences
+Across all 24 clips judged from the surveyed calibration: **19 of 19 offences
 found, no false alarms**, and the six clean-lap and near-miss clips all
 correctly report no offence.
 
@@ -51,11 +51,26 @@ excursion and **declines to report the blip**, which is the sustained-frame rule
 doing its job rather than a miss. The suppressed event is recorded separately
 from genuine misses.
 
+## Incident score
+
+Detection confidence answers "was this a real excursion". It is not actionable
+on its own -- a steward cannot act until the incident is pinned on someone -- so
+the two are multiplied rather than averaged:
+
+    incident score = detection confidence x driver-ID confidence
+
+A shaky identification drags the whole incident down instead of being smoothed
+over by a confident measurement. On `side_by_side/trackside` that reads
+100% x 54% = 54%: the geometry is certain, the naming is not, and the incident
+is ranked accordingly.
+
 ## Driver attribution
 
-30 of 31 tracks were attributed to the right car. On the two-car clips the
-livery rung fires on 10 of 12 tracks and is correct every time; the remaining
-tracks are short fragments the ladder declines to name rather than guessing.
+30 of 30 tracks were attributed to the right car. On the two-car clips the
+livery rung carries most of them and is correct every time; where the tracker
+lost a car and picked it up again, the continuity rung reclaims it by checking
+the two stretches never overlapped in time. Short fragments the ladder cannot
+place are escalated unnamed rather than guessed.
 
 ## Camera solution from video alone
 
