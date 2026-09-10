@@ -12,6 +12,7 @@ afterwards.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
 import pickle
@@ -27,15 +28,32 @@ SELF_CALIBRATION = pathlib.Path("pipeline_out/self_calibration.json")
 DETECTION_CACHE = pathlib.Path("pipeline_out/detections")
 
 
+def _weights_fingerprint(path):
+    """Content hash of the detector's weights, or the name if it has no file."""
+    if not path:
+        return "none"
+    file = pathlib.Path(path)
+    if not file.exists():
+        return str(path)
+    digest = hashlib.sha256()
+    with file.open("rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            digest.update(block)
+    return f"{file.name}:{digest.hexdigest()[:16]}"
+
+
 def detect_clip(clip, detector, cache=True, progress=None):
     """Detections for every frame, cached so a clip is judged under more than
     one calibration without paying for inference twice."""
     name = getattr(detector, "name", type(detector).__name__)
     path = DETECTION_CACHE / f"{clip.scenario}__{clip.camera}__{name}.pkl"
+    fingerprint = _weights_fingerprint(getattr(detector, "weights", None))
     if cache and path.exists():
         with path.open("rb") as fh:
             blob = pickle.load(fh)
-        if blob.get("frames") and blob.get("weights") == getattr(detector, "weights", None):
+        # Keyed on the weights' contents, not their path: retraining to the same
+        # filename must invalidate the cache rather than silently reuse it.
+        if blob.get("frames") and blob.get("fingerprint") == fingerprint:
             frames = {k: cv2.imdecode(v, cv2.IMREAD_COLOR) for k, v in blob["frames"].items()}
             return blob["detections"], frames
 
@@ -53,7 +71,7 @@ def detect_clip(clip, detector, cache=True, progress=None):
                    for k, v in frames_bgr.items()}
         with path.open("wb") as fh:
             pickle.dump({"detections": per_frame, "frames": encoded,
-                         "weights": getattr(detector, "weights", None)}, fh,
+                         "fingerprint": fingerprint}, fh,
                         protocol=pickle.HIGHEST_PROTOCOL)
     return per_frame, frames_bgr
 

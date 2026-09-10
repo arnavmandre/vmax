@@ -59,8 +59,22 @@ gap the training data cannot cover.
 
 ## Running it
 
+The trained weights, the clips and the built console are all committed, so a
+clone can judge a clip without training anything:
+
 ```sh
+git clone -b claude/dazzling-tesla-k04gkf https://github.com/arnavmandre/vmax.git
+cd vmax
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements-pipeline.txt
+python -m vmax_vision.cli demo                      # judge one clip, print the verdict
+```
+
+`demo` takes `--clip scenario/camera`; pass an unknown one to list them all.
+
+The rest of the commands:
+
+```sh
 python -m vmax_vision.cli selfcal                 # homography from video alone
 python -m vmax_vision.cli train --iterations 2600 # train VMAX-Net on held-in clips
 python -m vmax_vision.cli run --mode surveyed     # judge every clip

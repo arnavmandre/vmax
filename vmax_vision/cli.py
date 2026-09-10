@@ -77,6 +77,57 @@ def cmd_run(args):
             cameras_wanted=args.cameras or None, out_dir=args.out)
 
 
+def cmd_demo(args):
+    """Judge one clip and print the verdict the way a steward would read it."""
+    from . import clips as clipmod
+    from .pipeline import run_clip
+    by_key = {c.key: c for c in clipmod.discover(include_race_pace=False)}
+    if args.clip not in by_key:
+        print(f"unknown clip {args.clip!r}. available:")
+        for key in sorted(by_key):
+            print(f"  {key}")
+        return 1
+    clip = by_key[args.clip]
+    print(f"reading {clip.video} ({clip.camera} camera)", flush=True)
+    detector = _detector(args)
+    result = run_clip(clip, detector, mode=args.mode)
+
+    truth = clip.ground_truth()["events"]
+    print()
+    print(f"  clip            {clip.key}")
+    print(f"  calibration     {result['calibration_label']}")
+    print(f"  withheld from training  {'yes' if clip.held_out else 'no'}")
+    print(f"  cars tracked    {len(result['tracks'])}")
+    any_event = False
+    for tid, track in sorted(result["tracks"].items()):
+        car = (track.get("attribution") or {}).get("car_id") or f"track {tid}"
+        rung = (track.get("attribution") or {}).get("rung", "-")
+        for ev in track["events"]:
+            any_event = True
+            actual = truth.get(car, {}).get("events", [])
+            print()
+            print(f"  OFFENCE  {car}  (identified by {rung})")
+            print(f"    frames        {ev['start_frame']}-{ev['end_frame_inclusive']}"
+                  f"  ({ev['frame_count']} off track, {ev['start_time_s']:.2f}-{ev['end_time_exclusive_s']:.2f} s)")
+            print(f"    peak margin   {ev['peak_margin_m']:+.3f} m beyond the white line")
+            print(f"    confidence    {ev['confidence'] * 100:.0f}%")
+            if actual:
+                a = actual[0]
+                print(f"    ground truth  frames {a['start_frame']}-{a['end_frame_inclusive']}, "
+                      f"peak {a['peak_margin_m']:+.3f} m")
+                print(f"    error         {ev['peak_margin_m'] - a['peak_margin_m']:+.3f} m, "
+                      f"{ev['start_frame'] - a['start_frame']:+d} frames on the start")
+    if not any_event:
+        print()
+        print("  NO OFFENCE  no sustained excursion in this clip")
+        for car, info in truth.items():
+            for a in info.get("events", []):
+                print(f"    note: ground truth has a {a['frame_count']}-frame excursion by {car} "
+                      f"peaking at {a['peak_margin_m']:+.3f} m")
+    print()
+    return 0
+
+
 def cmd_evaluate(args):
     from .evaluate import score_run
     report = score_run(run_dir=args.runs, out=args.out)
@@ -133,6 +184,15 @@ def main(argv=None):
     p.add_argument("--cameras", nargs="*", default=None)
     p.add_argument("--out", default="pipeline_out/runs")
     p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("demo", help="judge one clip and print the verdict")
+    p.add_argument("--clip", default="violation_0.30m/trackside",
+                   help="scenario/camera, e.g. violation_0.30m/trackside")
+    p.add_argument("--detector", choices=["vmaxnet", "yolo-coco"], default="vmaxnet")
+    p.add_argument("--weights", default="pipeline_out/vmaxnet.pt")
+    p.add_argument("--threshold", type=float, default=0.25)
+    p.add_argument("--mode", choices=["surveyed", "self"], default="surveyed")
+    p.set_defaults(func=cmd_demo)
 
     p = sub.add_parser("evaluate", help="score pipeline output against the labels")
     p.add_argument("--runs", default="pipeline_out/runs")
