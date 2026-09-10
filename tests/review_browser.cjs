@@ -9,4 +9,4 @@ assert.ok(await page.locator('video').evaluate(v=>v.videoWidth>0));await page.lo
 await page.locator('#showOverlay').uncheck();await page.locator('#showOverlay').check();
 assert.equal(await page.locator('#count').textContent(),'Not analysed');assert.ok(await page.locator('[data-decision]').first().isDisabled());
 assert.deepEqual(errors,[]);console.log('Original-video loading, frame stepping, overlay toggle, and no-results state passed.');
-}finally{if(browser)await browser.close();server.kill();}})().catch(e=>{console.error(e);process.exit(1);});
+}catch(e){console.error('Browser test failure:',e.message);throw e;}finally{if(browser)await browser.close();server.kill();}})().catch(e=>{console.error(e);process.exit(1);});
