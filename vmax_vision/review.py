@@ -32,7 +32,7 @@ def build(manifest_path,out,runs=None):
     text=text.replace('__REVIEW_DATA__',json.dumps(payload).replace('<','\\u003c'))
     (out/'index.html').write_text(text)
     shutil.copyfile(Path(__file__).with_name('review.js'),out/'review.js')
-    print(f'Review bundle: {out}/index.html\nServe: python -m http.server 8000 --directory {out}')
+    print(f'Review bundle: {out}/index.html\nServe: python -m vmax_vision.serve --port 8000 --directory {out}')
 
 
 def main(argv=None):

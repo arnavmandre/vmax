@@ -94,7 +94,7 @@ accuracy claims. Calibration error is not reduced by observing more frames.
 
 ```sh
 python -m vmax_vision.cli review --manifest datasets/session_a/manifest.json --runs blind_runs/test_a --out review_out/session_a
-python -m http.server 8000 --directory review_out/session_a
+python -m vmax_vision.serve --port 8000 --directory review_out/session_a
 ```
 
 Open http://localhost:8000. The bundle copies original video, loads predictions
@@ -129,6 +129,12 @@ Unvalidated legacy colour identities are disabled on manifest input. Unknown
 identity remains visible, and spatial proximity cannot merge two cars by itself.
 Real-data labelling, model calibration, multi-camera fusion, deformable tyre
 geometry and moving-camera reconstruction remain unimplemented.
+
+## Measured baseline
+
+See [the first blind benchmark](VALIDATION_UPGRADE.md): the existing checkpoint
+missed the only labelled excursion in two new test clips. This is an honest
+failed-generalization baseline, not a claimed accuracy improvement.
 
 ## Verification
 

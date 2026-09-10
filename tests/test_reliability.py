@@ -87,6 +87,21 @@ class ReliabilityTests(unittest.TestCase):
         self.assertTrue((hi<0).all())
         with self.assertRaises(ValueError):CircuitMap([[0,0],[1,1],[0,1],[1,0]])
 
+    def test_video_byte_ranges(self):
+        import functools,threading,http.client
+        from http.server import ThreadingHTTPServer
+        from vmax_vision.serve import RangeHandler
+        with tempfile.TemporaryDirectory() as d:
+            Path(d,'video.mp4').write_bytes(b'0123456789')
+            server=ThreadingHTTPServer(('127.0.0.1',0),functools.partial(RangeHandler,directory=d))
+            thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start()
+            try:
+                for value,status,body in [('bytes=2-5',206,b'2345'),('bytes=-3',206,b'789'),('bytes=99-',416,b'')]:
+                    conn=http.client.HTTPConnection(*server.server_address)
+                    conn.request('GET','/video.mp4',headers={'Range':value})
+                    response=conn.getresponse();self.assertEqual(response.status,status);self.assertEqual(response.read(),body);conn.close()
+            finally:server.shutdown();server.server_close();thread.join()
+
     def test_path_escape_rejected(self):
         from vmax_vision.blind import resolve
         with tempfile.TemporaryDirectory() as d:
