@@ -1,0 +1,25 @@
+name: Steward reliability
+on:
+  push:
+    branches: ['codex/**']
+  pull_request:
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install numpy scipy pillow opencv-python-headless
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m unittest discover -s tests -p 'test_reliability.py' -v
+      - run: python -m unittest discover -s tests -p 'test_runtime.py' -v
+      - run: python tests/test_pipeline.py
+      - run: python -m compileall -q vmax_vision
+      - run: node --check vmax_vision/review.js
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/review_browser.cjs

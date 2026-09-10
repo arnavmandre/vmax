@@ -10,7 +10,6 @@ import json
 import pathlib
 from dataclasses import dataclass, field
 
-import cv2
 import numpy as np
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
@@ -101,6 +100,7 @@ def discover(output=OUTPUT, data=DATA, include_race_pace=True):
 
 def read_frames(path, limit=None):
     """Decode a clip to BGR frames in order."""
+    import cv2
     cap = cv2.VideoCapture(str(path))
     if not cap.isOpened():
         raise RuntimeError(f"cannot open {path}")
@@ -126,6 +126,7 @@ def static_background(path, sample=32):
     Used by the self-calibration, which must work from video alone and must not
     be confused by the very cars it is later asked to judge.
     """
+    import cv2
     cap = cv2.VideoCapture(str(path))
     total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
     picks = np.unique(np.linspace(0, max(total - 1, 0), sample).astype(int))

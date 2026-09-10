@@ -110,7 +110,7 @@ def cmd_demo(args):
             print(f"    frames        {ev['start_frame']}-{ev['end_frame_inclusive']}"
                   f"  ({ev['frame_count']} off track, {ev['start_time_s']:.2f}-{ev['end_time_exclusive_s']:.2f} s)")
             print(f"    peak margin   {ev['peak_margin_m']:+.3f} m beyond the white line")
-            print(f"    detection     {ev['confidence'] * 100:.0f}% confident this is a real excursion")
+            print(f"    detection     {ev['confidence'] * 100:.0f}% heuristic excursion score (uncalibrated)")
             print(f"    driver ID     {ev['driver_confidence'] * 100:.0f}% confident it was {car}")
             print(f"    INCIDENT      {ev['incident_score'] * 100:.0f}%"
                   "   (detection x driver ID -- a shaky identification drags it down)")
@@ -283,6 +283,12 @@ def cmd_report(args):
 
 
 def main(argv=None):
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # Keep the standalone, dependency-light workflows available from one entry point.
+    extensions = {"generate":"generate", "blind":"blind", "review":"review", "import-video":"import_video"}
+    if argv and argv[0] in extensions:
+        import importlib
+        return importlib.import_module("." + extensions[argv[0]], __package__).main(argv[1:])
     ap = argparse.ArgumentParser(prog="vmax-steward", description=__doc__)
     sub = ap.add_subparsers(dest="command", required=True)
 
@@ -346,6 +352,7 @@ def main(argv=None):
     p = sub.add_parser("report", help="assemble the dashboard JSON")
     p.set_defaults(func=cmd_report)
 
+    ap.epilog = "Additional workflows: generate, blind, review, import-video (use COMMAND --help)."
     args = ap.parse_args(argv)
     return args.func(args)
 

@@ -1,7 +1,7 @@
-.venv/
 __pycache__/
 *.pyc
-*.pt
-!pipeline_out/vmaxnet.pt
-pipeline_out/runs/
 pipeline_out/detections/
+.pytest_cache/
+datasets/
+review_out/
+blind_runs/

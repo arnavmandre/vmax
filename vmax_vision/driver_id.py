@@ -150,7 +150,8 @@ def attribute(track_frames, frames_bgr, judgements_by_track, fps=24.0):
             # tracker lost and picked up again -- that is the continuity rung,
             # and treating it as a conflict reports a single excursion twice.
             other = claimed[best]
-            if _disjoint(track_frames[tid], track_frames[other]):
+            if _disjoint(track_frames[tid], track_frames[other]) and _motion_continuity(
+                    judgements_by_track.get(tid, []), judgements_by_track.get(other, []), fps):
                 attributions[tid] = Attribution(
                     tid, best, "continuity", float(np.clip(confidence, 0, 1)),
                     {"reason": f"resumes track {other}; the two never overlap",
@@ -167,23 +168,20 @@ def attribute(track_frames, frames_bgr, judgements_by_track, fps=24.0):
             {"share": float(share), "voting_frames": frames_voting,
              "tally": {k: float(v) for k, v in tally.items()}})
 
-    # Rung 2-4 for anything the livery rung could not settle.
-    unresolved = [t for t, a in attributions.items() if a.car_id is None]
-    remaining = [c for c in LIVERIES if c not in claimed]
-    if unresolved and len(remaining) == 1 and len(unresolved) == 1:
-        tid = unresolved[0]
-        attributions[tid] = Attribution(tid, remaining[0], "sequence", 0.55,
-                                        {"reason": "only remaining entry on track"})
-    elif unresolved:
-        laterals = {}
-        for tid in unresolved:
-            js = judgements_by_track.get(tid, [])
-            if js:
-                lat = np.mean([tm.track_coordinates(j.position[None])[1][0] for j in js])
-                laterals[tid] = float(lat)
-        for rank, (tid, lat) in enumerate(sorted(laterals.items(), key=lambda kv: -kv[1])):
-            car = remaining[rank] if rank < len(remaining) else None
-            attributions[tid] = Attribution(tid, car, "lane", 0.35 if car else 0.0,
-                                            {"mean_lateral_offset_m": lat,
-                                             "reason": "separated by held line"})
+    # Lane and running order do not establish identity. Preserve unknowns.
     return attributions
+
+
+def _motion_continuity(a, b, fps, max_gap_s=0.25, tolerance_m=1.0):
+    """Conservative short-gap association using timestamped constant velocity."""
+    if not a or not b or fps <= 0:
+        return False
+    a, b = sorted(a, key=lambda j: j.frame_idx), sorted(b, key=lambda j: j.frame_idx)
+    if a[0].frame_idx > b[0].frame_idx:
+        a, b = b, a
+    dt = (b[0].frame_idx - a[-1].frame_idx) / fps
+    if dt <= 0 or dt > max_gap_s or len(a) < 2:
+        return False
+    velocity = (a[-1].position - a[-2].position) / ((a[-1].frame_idx-a[-2].frame_idx)/fps)
+    predicted = a[-1].position + velocity * dt
+    return bool(np.linalg.norm(predicted-b[0].position) <= tolerance_m)

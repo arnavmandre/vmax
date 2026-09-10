@@ -47,7 +47,12 @@ def detect_clip(clip, detector, cache=True, progress=None):
     one calibration without paying for inference twice."""
     name = getattr(detector, "name", type(detector).__name__)
     path = DETECTION_CACHE / f"{clip.scenario}__{clip.camera}__{name}.pkl"
-    fingerprint = _weights_fingerprint(getattr(detector, "weights", None))
+    settings = {k: getattr(detector, k, None) for k in
+                ("threshold", "max_detections", "imgsz", "device")}
+    from .evidence import cache_signature
+    fingerprint = cache_signature(clip.video, getattr(detector, "weights", None), settings,
+        [pathlib.Path(__file__).with_name("detector.py"), pathlib.Path(__file__).with_name("model.py")])
+
     if cache and path.exists():
         with path.open("rb") as fh:
             blob = pickle.load(fh)
@@ -83,17 +88,28 @@ def load_homography(camera_name, mode="surveyed", cameras=None):
         return np.array(cameras[camera_name].H, float), 0.0, "surveyed calibration"
     data = json.loads(SELF_CALIBRATION.read_text())
     entry = data[camera_name]
-    sigma = float(entry["track_frame_error"]["mean_abs_lateral_error_m"])
+    # Truth-derived diagnostics must never become an inference input.
+    sigma = float(entry.get("operational_sigma_m", 1.0))
     return np.array(entry["homography"], float), sigma, "video-only self-calibration"
 
 
 def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
-             bridge=4, cache=True, progress=None):
+             bridge=4, cache=True, progress=None, calibration=None, identify=True, track_map=None):
     """Run the whole stack over one clip and return a plain-dict result."""
-    cameras = cameras or Camera.load_all()
+    if calibration is None:
+        cameras = cameras or Camera.load_all()
     if clip.moving_camera:
         raise ValueError("run_clip handles fixed cameras; the moving rig is training data")
-    H, sigma_calibration, calibration_label = load_homography(clip.camera, mode, cameras)
+    if calibration is None:
+        H, sigma_calibration, calibration_label = load_homography(clip.camera, mode, cameras)
+    else:
+        H = np.asarray(calibration["homography"], float)
+        sigma_calibration = float(calibration["sigma_m"])
+        calibration_label = str(calibration.get("source", "provided calibration"))
+        if H.shape != (3, 3) or not np.isfinite(H).all() or np.linalg.matrix_rank(H) != 3:
+            raise ValueError("calibration must be a finite nonsingular 3x3 homography")
+        if not np.isfinite(sigma_calibration) or sigma_calibration < 0:
+            raise ValueError("calibration sigma must be finite and nonnegative")
     H_inv = np.linalg.inv(H)
 
     per_frame, frames_bgr = detect_clip(clip, detector, cache=cache, progress=progress)
@@ -108,9 +124,9 @@ def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
 
     # Judge each track once, so the attribution ladder has a trajectory to
     # reason about, then attribute.
-    per_track = {tid: boundary.judge_clip(frames, H_inv, fps=clip.fps)
+    per_track = {tid: boundary.judge_clip(frames, H_inv, fps=clip.fps, track_map=track_map)
                  for tid, frames in by_track.items()}
-    attributions = driver_id.attribute(by_track, frames_bgr, per_track, fps=clip.fps)
+    attributions = driver_id.attribute(by_track, frames_bgr, per_track, fps=clip.fps) if identify else {}
 
     # An incident belongs to a car, not to a track id. If the tracker split one
     # car into two ids, judging each separately reports one excursion twice and
@@ -120,12 +136,8 @@ def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
     members: dict[str, list] = {}
     for tid, frames in by_track.items():
         attribution = attributions.get(tid)
-        # Group by what the paint says, then let the ladder decide the name.
-        # Two overlapping tracks whose livery vote agrees are one car, however
-        # the ladder resolved the conflict between them.
+        # Never reinstate a rejected identity claim while grouping incidents.
         car = attribution.car_id if attribution else None
-        if car is None and attribution is not None:
-            car = (attribution.evidence or {}).get("livery_vote")
         key = car or f"track {tid}"
         target = grouped.setdefault(key, {})
         members.setdefault(key, []).append(tid)
@@ -133,11 +145,12 @@ def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
             if idx not in target or det["score"] > target[idx]["score"]:
                 target[idx] = det
 
-    grouped, members = _merge_coincident(grouped, members, H_inv)
+    # Proximity alone is insufficient identity evidence for side-by-side cars.
+    # Preserve ambiguous tracks for review instead of merging them spatially.
 
     judgements, events = {}, {}
     for key, frames in grouped.items():
-        js = boundary.judge_clip(frames, H_inv, fps=clip.fps)
+        js = boundary.judge_clip(frames, H_inv, fps=clip.fps, track_map=track_map)
         sigma_lateral = boundary.lateral_noise(js)
         evs = boundary.find_events(js, min_frames=min_frames, bridge=bridge, fps=clip.fps)
         attribution = _merged_attribution(key, members[key], attributions)
@@ -150,6 +163,8 @@ def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
         events[key] = evs
 
     return {
+        "confidence_kind": "uncalibrated heuristic; not a probability",
+        "geometry_contract": "ideal tyre contact centres; synthetic benchmark",
         "clip": clip.key,
         "scenario": clip.scenario,
         "camera": clip.camera,
@@ -180,6 +195,8 @@ def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
                         "max_excess_m": j.max_excess_m,
                         "is_violation": j.is_violation,
                         "contacts_world": j.fitted_contacts.tolist(),
+                        "raw_contacts_world": j.contacts_world.tolist(),
+                        "geometry_source": "model estimate, rigid fit and temporal smoothing",
                     }
                     for j in judgements[key]
                 ],
@@ -188,45 +205,6 @@ def run_clip(clip, detector, mode="surveyed", cameras=None, min_frames=3,
             for key in judgements
         },
     }
-
-
-def _merge_coincident(grouped, members, H_inv, radius_m=2.5, share=0.6):
-    """Fold an unnamed group into a named one when they are the same car.
-
-    Image-space suppression cannot do this: two cars racing side by side overlap
-    heavily in the picture. On the ground they never do -- a formula car is
-    under 2 m wide -- so world-space coincidence is an unambiguous test for one
-    car tracked twice.
-    """
-    named = [k for k in grouped if not k.startswith("track ")]
-    unnamed = [k for k in grouped if k.startswith("track ")]
-    if not named or not unnamed:
-        return grouped, members
-
-    def centres(frames):
-        out = {}
-        for idx, det in frames.items():
-            world = boundary.back_project(det["contacts_uv"], H_inv)
-            out[idx] = world.mean(axis=0)
-        return out
-
-    named_centres = {k: centres(grouped[k]) for k in named}
-    for key in unnamed:
-        mine = centres(grouped[key])
-        for other in named:
-            shared = set(mine) & set(named_centres[other])
-            if not shared:
-                continue
-            close = sum(np.linalg.norm(mine[i] - named_centres[other][i]) < radius_m
-                        for i in shared)
-            if close >= share * len(shared):
-                for idx, det in grouped[key].items():
-                    if idx not in grouped[other] or det["score"] > grouped[other][idx]["score"]:
-                        grouped[other][idx] = det
-                members[other].extend(members.pop(key))
-                grouped.pop(key)
-                break
-    return grouped, members
 
 
 def _merged_attribution(key, track_ids, attributions):
