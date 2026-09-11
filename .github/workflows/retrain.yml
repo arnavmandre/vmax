@@ -24,7 +24,17 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
       - run: python -m pip install numpy scipy pillow opencv-python-headless
       - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: retrained-model-blind-clips-and-review
+          run-id: 34605659793
+          github-token: ${{ github.token }}
+          path: recovered
+      - run: python -m unittest discover -s tests -p test_runtime.py -v
       - run: python scripts/retrain_blind.py
+        env:
+          VMAX_DEVELOPMENT_REUSE: recovered/retraining_out/development
       - uses: actions/upload-artifact@v4
         if: always()
         with:

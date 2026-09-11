@@ -61,7 +61,17 @@ def main():
     ROOT.mkdir(exist_ok=False)
     dump(ROOT/'protocol.json',PLAN)  # committed configuration, before any labels are scored
     dev=ROOT/'development'
-    generate(dev,PLAN['development_scenes'],PLAN['development_seed'])
+    reuse=os.environ.get('VMAX_DEVELOPMENT_REUSE')
+    if reuse and (Path(reuse)/'manifest.json').exists():
+        from vmax_vision.blind import validate_manifest
+        source=Path(reuse)
+        manifest=validate_manifest(source/'manifest.json')
+        if manifest['seed']!=PLAN['development_seed'] or len(manifest['clips'])!=PLAN['development_scenes']:
+            raise ValueError('recovered development dataset does not match fixed protocol')
+        shutil.copytree(source,dev)
+        print('Reused hash-verified development videos from earlier render',flush=True)
+    else:
+        generate(dev,PLAN['development_scenes'],PLAN['development_seed'])
     partition(dev)
     previous=Path('pipeline_out/vmaxnet.pt')
     summaries=[]

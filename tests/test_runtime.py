@@ -14,6 +14,23 @@ except ImportError:
 
 @unittest.skipIf(cv2 is None or torch is None,'requires OpenCV and PyTorch')
 class RuntimeTests(unittest.TestCase):
+    def test_manifest_training_loader_and_backward(self):
+        from vmax_vision.dataset import build_manifest
+        from vmax_vision.traindata import CropSampler
+        from vmax_vision.train import to_torch
+        from vmax_vision.model import VmaxNet, detection_loss
+        samples=build_manifest('examples/generated_dataset/manifest.json',
+                               'examples/generated_dataset/sealed/labels.json',max_frames=4,frame_stride=4)
+        self.assertTrue(samples)
+        manifest=json.loads(Path('examples/generated_dataset/manifest.json').read_text())
+        allowed={c['id'] for c in manifest['clips'] if c['split']=='train'}
+        self.assertTrue(all(s['clip'] in allowed for s in samples))
+        torch.set_num_threads(2)
+        x,target=to_torch(CropSampler(samples,crop=128,seed=21).batch(2))
+        loss,_=detection_loss(VmaxNet()(x),target)
+        self.assertTrue(torch.isfinite(loss))
+        loss.backward()
+
     def test_checkpoint_inference(self):
         from vmax_vision.detector import VmaxDetector
         from vmax_vision.model import VmaxNet
