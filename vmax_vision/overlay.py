@@ -111,14 +111,14 @@ def render_clip(clip, result, out_path, homography, show_limit=True, quality=20)
             live = [e for e in events.get(tid, [])
                     if e["start_frame"] <= idx <= e["end_frame_inclusive"]]
             label = (track.get("attribution") or {}).get("car_id") or f"track {tid}"
-            verdict = "OFF TRACK" if f["is_violation"] else "within limits"
+            verdict = "POSSIBLE EXCURSION" if f["is_violation"] else "within limits"
             colour = BAD if f["is_violation"] else GOOD
             cv2.putText(frame, f"{label:<8s} margin {f['margin_m']:+.3f} m   {verdict}",
                         (32, y), FONT, 0.46, colour, 1, cv2.LINE_AA)
             if live:
                 conf = live[0]["confidence"]
                 _bar(frame, 32, y + 8, 260, 6, conf, BAD if conf > 0.5 else WARN)
-                cv2.putText(frame, f"reported offence, confidence {conf*100:.0f}%",
+                cv2.putText(frame, f"review candidate, score {conf*100:.0f}%",
                             (302, y + 14), FONT, 0.40, INK, 1, cv2.LINE_AA)
             else:
                 cv2.putText(frame, "no offence reported for this frame", (32, y + 14),

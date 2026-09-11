@@ -37,20 +37,34 @@ def main(argv=None):
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--out", default=str(OUT / "vmaxnet.pt"))
     ap.add_argument("--resume", default=None, help="checkpoint to continue from")
+    ap.add_argument("--manifest", help="generated scene manifest; only train split is read")
+    ap.add_argument("--labels", help="training labels file paired with the manifest")
+    ap.add_argument("--max-frames", type=int, default=512)
+    ap.add_argument("--frame-stride", type=int, default=4)
+    ap.add_argument("--device", default="cpu")
     args = ap.parse_args(argv)
+    if bool(args.manifest) != bool(args.labels):
+        ap.error("--manifest and --labels must be supplied together")
 
     torch.set_num_threads(args.threads)
     torch.manual_seed(args.seed)
     OUT.mkdir(exist_ok=True)
+    pathlib.Path(args.out).parent.mkdir(parents=True, exist_ok=True)
 
     held = ", ".join(f"{k}:{v}" for k, v in clipmod.HELD_OUT_BY_SCENARIO.items())
     print(f"decoding training clips (held out -> {held})", flush=True)
-    samples = ds.build("train", verbose=True)
+    samples = (ds.build_manifest(args.manifest,args.labels,args.max_frames,args.frame_stride,args.seed)
+               if args.manifest else ds.build("train", verbose=True))
     print(f"{len(samples)} labelled training frames", flush=True)
     sampler = CropSampler(samples, crop=args.crop, seed=args.seed)
 
-    model = VmaxNet().to(memory_format=torch.channels_last)
+    model = VmaxNet().to(device=args.device, memory_format=torch.channels_last)
     history = []
+    provenance = {"dataset_kind":"legacy development clips"}
+    if args.manifest:
+        from .evidence import sha256
+        provenance = {"manifest_sha256":sha256(args.manifest),"labels_sha256":sha256(args.labels),
+                      "split":"train","sampled_frames":len(samples)}
     if args.resume:
         blob = torch.load(args.resume, map_location="cpu", weights_only=False)
         missing, unexpected = model.load_state_dict(blob["model"], strict=False)
@@ -73,6 +87,8 @@ def main(argv=None):
             group["lr"] = lr
 
         image, target = to_torch(sampler.batch(args.batch))
+        image = image.to(args.device)
+        target = {k:v.to(args.device) for k,v in target.items()}
         out = model(image)
         loss, parts = detection_loss(out, target)
         opt.zero_grad(set_to_none=True)
@@ -89,11 +105,11 @@ def main(argv=None):
                   f"mask {parts['mask']:6.4f} lr {lr:.2e} eta {eta/60:5.1f} min", flush=True)
         if step % 100 == 0 or step == args.iterations:
             torch.save({"model": model.state_dict(), "step": offset + step,
-                        "args": vars(args)}, args.out)
+                        "args": vars(args), "provenance": provenance}, args.out)
             (OUT / "training_log.json").write_text(json.dumps(history, indent=1))
 
     torch.save({"model": model.state_dict(), "step": offset + args.iterations,
-                "args": vars(args)}, args.out)
+                "args": vars(args), "provenance": provenance}, args.out)
     (OUT / "training_log.json").write_text(json.dumps(history, indent=1))
     print(f"saved {args.out} after {(time.time()-start)/60:.1f} min", flush=True)
 

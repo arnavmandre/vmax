@@ -48,6 +48,9 @@ class Event:
     confidence_terms: dict = field(default_factory=dict)
     driver_confidence: float = 0.0
     incident_score: float = 0.0
+    evidence_coverage: float = 0.0
+    confidence_kind: str = "uncalibrated heuristic; not a probability"
+    review_status: str = "needs_review"
 
 
 def back_project(contacts_uv, H_inv):
@@ -83,7 +86,7 @@ def smooth_track(positions, headings, window=5, poly=2):
     return sp, sh
 
 
-def judge_clip(tracked, H_inv, fps=24.0, smooth=True):
+def judge_clip(tracked, H_inv, fps=24.0, smooth=True, track_map=None):
     """Per-frame judgements for one track identity over a clip."""
     frames = sorted(tracked)
     raw_contacts, positions, headings, scores = [], [], [], []
@@ -98,13 +101,19 @@ def judge_clip(tracked, H_inv, fps=24.0, smooth=True):
     positions = np.array(positions)
     headings = np.array(headings)
     if smooth and len(frames) >= 5:
-        positions, headings = smooth_track(positions, headings)
+        # Never smooth across unobserved time or join disjoint tracks.
+        cuts = np.r_[0, np.flatnonzero(np.diff(frames) != 1) + 1, len(frames)]
+        for start, end in zip(cuts[:-1], cuts[1:]):
+            if end - start >= 5:
+                positions[start:end], headings[start:end] = smooth_track(
+                    positions[start:end], headings[start:end])
 
     out = []
     for i, idx in enumerate(frames):
         fitted = tm.car_contacts(positions[i], headings[i])
-        excess = tm.signed_excess(fitted)
-        raw_excess = tm.signed_excess(raw_contacts[i])
+        signed_excess = (track_map or tm).signed_excess
+        excess = signed_excess(fitted)
+        raw_excess = signed_excess(raw_contacts[i])
         out.append(FrameJudgement(
             frame_idx=idx, time_s=idx / fps,
             contacts_world=raw_contacts[i], fitted_contacts=fitted,
@@ -140,19 +149,22 @@ def find_events(judgements, min_frames=3, bridge=4, fps=24.0):
     being measured, and too short to join the isolated two-frame blip to
     anything.
     """
+    if fps <= 0 or min_frames < 1 or bridge < 0:
+        raise ValueError("fps/min_frames must be positive; bridge nonnegative")
     flags = {j.frame_idx: j for j in judgements}
-    idxs = sorted(flags)
     events, run = [], []
-    gap = 0
-    for i in idxs:
+    previous = None
+    for i in sorted(flags):
+        # bridge counts missing original frames, never known legal frames.
+        if run and previous is not None and i - previous - 1 > bridge:
+            events.append(run)
+            run = []
         if flags[i].is_violation:
             run.append(i)
-            gap = 0
         elif run:
-            gap += 1
-            if gap > bridge:
-                events.append(run)
-                run, gap = [], 0
+            events.append(run)
+            run = []
+        previous = i
     if run:
         events.append(run)
 
@@ -209,16 +221,17 @@ def score_event(event, judgements, sigma_lateral, calibration_sigma=0.0,
     """
     members = [j for j in judgements if event.start_frame <= j.frame_idx <= event.end_frame_inclusive]
     offence = [j for j in members if j.is_violation]
-    n_eff = max(min(len(offence), 8), 1)          # correlated frames: cap the gain
+    n_eff = 1  # Peak selection/temporal dependence do not justify sqrt(n) precision.
     sigma = float(np.hypot(sigma_lateral / np.sqrt(n_eff), calibration_sigma))
     z = event.peak_margin_m / max(sigma, 1e-4)
     geometric = _phi(z)
 
     duration = float(np.clip(len(offence) / (min_frames * 2.0), 0.35, 1.0))
     detection = float(np.clip((event.mean_score - 0.25) / 0.45, 0.3, 1.0))
-    coverage = float(np.clip(len(offence) / max(len(members), 1), 0.5, 1.0))
+    coverage = float(np.clip(len(members) / max(event.end_frame_inclusive - event.start_frame + 1, 1), 0.0, 1.0))
     confidence = geometric * (0.55 + 0.45 * duration) * (0.6 + 0.4 * detection) * coverage
 
+    event.evidence_coverage = coverage
     event.confidence = float(np.clip(confidence, 0.0, 1.0))
     event.confidence_terms = {
         "geometric": float(geometric),

@@ -1,0 +1,33 @@
+name: Steward reliability
+on:
+  push:
+    branches: ['codex/**']
+  pull_request:
+  workflow_dispatch:
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install numpy scipy pillow opencv-python-headless
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - run: python -m unittest discover -s tests -p 'test_reliability.py' -v
+      - run: python -m unittest discover -s tests -p 'test_runtime.py' -v
+      - run: python tests/test_pipeline.py
+      - run: python -m compileall -q vmax_vision
+      - run: node --check vmax_vision/review.js
+      - run: python -m vmax_vision.cli blind infer --manifest examples/generated_dataset/manifest.json --split test --weights pipeline_out/vmaxnet.pt --out ci_out/blind
+      - run: python -m vmax_vision.cli blind score --manifest examples/generated_dataset/manifest.json --runs ci_out/blind --labels examples/generated_dataset/sealed/labels.json --out ci_out/evaluation
+      - run: python -m vmax_vision.cli review --manifest examples/generated_dataset/manifest.json --runs ci_out/blind --out ci_out/review
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blind-evaluation-and-review
+          path: ci_out/
+          retention-days: 14
+      - run: npm install --no-save playwright
+      - run: npx playwright install --with-deps chromium
+      - run: node tests/review_browser.cjs

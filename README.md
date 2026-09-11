@@ -1,5 +1,9 @@
 # VMAX — Formula-style realism upgrade
 
+New reliability, blind-test, scene-generation and original-video review workflows:
+[Run the steward improvements](IMPROVEMENTS.md). Previous accuracy reports are
+legacy measurements and do not validate this upgrade.
+
 The v2 package upgrades the original simulator's visuals and adds a race-pace presentation sequence. It contains original generic single-seater geometry, not a licensed replica of a particular team's car or a specific season's regulation package.
 
 ## Two halves

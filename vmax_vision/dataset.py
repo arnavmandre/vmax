@@ -9,6 +9,7 @@ ever turned into labels.
 from __future__ import annotations
 
 import json
+import pathlib
 
 import cv2
 import numpy as np
@@ -114,4 +115,56 @@ def build(split="train", cameras=None, verbose=False):
                             "camera": row["camera"], "instances": row["instances"]})
         if verbose:
             print(f"  {clip.key}: {len(labels)} labelled frames", flush=True)
+    return samples
+
+
+def build_manifest(manifest_path, labels_path, max_frames=512, frame_stride=4, seed=0):
+    """Train only on explicitly assigned scene families, with bounded decoding.
+
+    The labels file is training input only. Annotation hulls remain approximate;
+    this loader does not claim pixel-perfect visible instance masks.
+    """
+    from .blind import validate_manifest, resolve
+    manifest = validate_manifest(manifest_path)
+    labels = json.loads(pathlib.Path(labels_path).read_text())["clips"]
+    pool = [c for c in manifest["clips"] if c["split"] == "train"]
+    if not pool or max_frames < 1 or frame_stride < 1:
+        raise ValueError("training split must be nonempty; frame limits must be positive")
+    candidates = [(c, i) for c in pool for i in range(0, c["frames"], frame_stride)]
+    rng = np.random.default_rng(seed)
+    picks = rng.choice(len(candidates), min(max_frames, len(candidates)), replace=False)
+    wanted = {}
+    for ix in picks:
+        c, i = candidates[ix]
+        wanted.setdefault(c["id"], set()).add(i)
+    samples = []
+    for c in pool:
+        if c["id"] not in wanted:
+            continue
+        truth = labels[c["id"]]
+        if truth["video_sha256"] != c["video_sha256"]:
+            raise ValueError("training label/video mismatch")
+        cam = Camera(c["camera_spec"])
+        rows = {}
+        for row in truth["frames"]:
+            rows.setdefault(row["frame_idx"], []).append(row)
+        video = resolve(pathlib.Path(manifest_path).parent, c["video"])
+        for idx, image in clipmod.read_frames(video):
+            if idx not in wanted[c["id"]]:
+                continue
+            instances = []
+            for row in rows.get(idx, []):
+                points = np.asarray(row["contacts_world"])
+                uv, depth = cam.project(np.column_stack([points, np.zeros(4)]))
+                hull, hull_depth = cam.project(world_to_local(row["world_position"],row["heading_rad"],BODY_HULL))
+                if np.min(depth) <= .5 or np.min(hull_depth) <= .5:
+                    continue
+                box = np.r_[hull.min(axis=0),hull.max(axis=0)]
+                if box[2]<0 or box[3]<0 or box[0]>=image.shape[1] or box[1]>=image.shape[0]:
+                    continue
+                instances.append({"car_id":row["car_id"],"box":box.tolist(),"contacts_uv":uv.tolist(),"hull_uv":hull.tolist()})
+            if instances:
+                samples.append({"image":image,"clip":c["id"],"frame_idx":idx,"camera":c["id"],"instances":instances})
+    if not samples:
+        raise ValueError("no usable training frames; inspect camera coverage")
     return samples

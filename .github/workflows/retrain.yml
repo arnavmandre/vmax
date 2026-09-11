@@ -1,0 +1,45 @@
+name: Retrain and locked blind evaluation
+on:
+  push:
+    branches: ['codex/steward-reliability-and-blind-tests']
+    paths: ['scripts/retrain_blind.py', '.github/workflows/retrain.yml']
+  workflow_dispatch:
+concurrency:
+  group: vmax-retrain-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    env:
+      PYTHONUNBUFFERED: '1'
+      PYTHONPATH: '.'
+      OMP_NUM_THREADS: '2'
+      MKL_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update -qq && sudo apt-get install -y ffmpeg
+      - run: python -m pip install numpy scipy pillow opencv-python-headless
+      - run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: retrained-model-blind-clips-and-review
+          run-id: 34605659793
+          github-token: ${{ github.token }}
+          path: recovered
+      - run: python -m unittest discover -s tests -p test_runtime.py -v
+      - run: python scripts/retrain_blind.py
+        env:
+          VMAX_DEVELOPMENT_REUSE: recovered/retraining_out/development
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: retrained-model-blind-clips-and-review
+          path: |
+            retraining_out/
+            pipeline_out/training_log.json
+          retention-days: 30

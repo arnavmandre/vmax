@@ -50,7 +50,8 @@ class VmaxDetector:
         blob = torch.load(weights, map_location=device, weights_only=False)
         self.model = VmaxNet()
         self.model.load_state_dict(blob["model"])
-        self.model.eval().to(memory_format=torch.channels_last)
+        self.device = str(device)
+        self.model.eval().to(device=device, memory_format=torch.channels_last)
         self.threshold = threshold
         self.max_detections = max_detections
         self.step = int(blob.get("step", 0))
@@ -60,7 +61,7 @@ class VmaxDetector:
     def __call__(self, frame_bgr):
         padded, h, w = _pad_to(frame_bgr)
         x = torch.from_numpy(padded).permute(2, 0, 1)[None].float()
-        x = ((x - 114.0) / 58.0).contiguous(memory_format=torch.channels_last)
+        x = ((x - 114.0) / 58.0).to(self.device).contiguous(memory_format=torch.channels_last)
         out = self.model(x)
 
         heat = torch.sigmoid(out["heat"])[0, 0]
@@ -71,18 +72,18 @@ class VmaxDetector:
             top = torch.argsort(heat[ys, xs], descending=True)[: self.max_detections]
             ys, xs = ys[top], xs[top]
 
-        mask_prob = torch.sigmoid(out["mask"])[0, 0].numpy()
+        mask_prob = torch.sigmoid(out["mask"])[0, 0].cpu().numpy()
         mask_full = cv2.resize(mask_prob, (padded.shape[1], padded.shape[0]),
                                interpolation=cv2.INTER_LINEAR)[:h, :w] > 0.5
 
         detections = []
         for y, x in zip(ys.tolist(), xs.tolist()):
             score = float(heat[y, x])
-            off = out["offset"][0, :, y, x].numpy()
-            size = np.exp(np.clip(out["size"][0, :, y, x].numpy(), -4, 7)) * STRIDE
+            off = out["offset"][0, :, y, x].cpu().numpy()
+            size = np.exp(np.clip(out["size"][0, :, y, x].cpu().numpy(), -4, 7)) * STRIDE
             cx = (x + float(off[0])) * STRIDE
             cy = (y + float(off[1])) * STRIDE
-            contacts = out["contacts"][0, :, y, x].numpy().reshape(4, 2) * CONTACT_SCALE
+            contacts = out["contacts"][0, :, y, x].cpu().numpy().reshape(4, 2) * CONTACT_SCALE
             contacts = contacts + (cx, cy)
             box = np.array([cx - size[0] / 2, cy - size[1] / 2,
                             cx + size[0] / 2, cy + size[1] / 2])
@@ -124,12 +125,12 @@ class CocoYoloDetector:
             return detections
         masks = None
         if res.masks is not None:
-            masks = res.masks.data.numpy()
+            masks = res.masks.data.cpu().numpy()
         for i in range(len(res.boxes)):
             cls = int(res.boxes.cls[i])
             if cls not in self.VEHICLE_CLASSES:
                 continue
-            box = res.boxes.xyxy[i].numpy()
+            box = res.boxes.xyxy[i].cpu().numpy()
             mask_crop = None
             if masks is not None and i < len(masks):
                 full = cv2.resize(masks[i], (frame_bgr.shape[1], frame_bgr.shape[0])) > 0.5
